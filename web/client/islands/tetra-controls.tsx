@@ -13,6 +13,7 @@
 import { clientEntry, css, type Handle, on } from "@remix-run/ui";
 
 import { game } from "../games/tetra-do/game.ts";
+import { sound } from "../games/tetra-do/sound.ts";
 import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
 
 export const TetraControls = clientEntry(
@@ -26,6 +27,29 @@ export const TetraControls = clientEntry(
     return () => (
       <>
         <div mix={controlsStyle}>
+          <button
+            type="button"
+            aria-pressed={sound.enabled ? "true" : "false"}
+            aria-label={sound.enabled ? "音を消す" : "音を出す"}
+            mix={sound.enabled
+              ? [
+                buttonStyle,
+                pressedStyle,
+                on("click", () => {
+                  sound.toggle();
+                  handle.update();
+                }),
+              ]
+              : [
+                buttonStyle,
+                on("click", () => {
+                  sound.toggle();
+                  handle.update();
+                }),
+              ]}
+          >
+            {sound.enabled ? "音あり" : "音なし"}
+          </button>
           <button
             type="button"
             aria-pressed={game.live ? "true" : "false"}
@@ -73,7 +97,7 @@ export const TetraControls = clientEntry(
                 </p>
                 <p mix={cardTextStyle}>
                   得点は、隣り合う打ち消し（<code>a a⁻¹</code>{" "}
-                  など）を除いた長さの2乗です。打ち消し合っている部分は、なぞっている線が細い破線になります。除いた長さが3未満の経路は消えません。外れると5秒減ります。
+                  など）を除いた長さの2乗です。打ち消し合っている部分は、なぞっている線が細い破線になります。戻らない経路は消えないだけで、時間は減りません。
                 </p>
                 <p mix={cardTextStyle}>
                   「なぞり中に立体を回す」をオフにすると、立体は指を離してから答え合わせとして動きます。
@@ -118,7 +142,7 @@ function summary(): string {
     game.seedLabel,
     `消去 ${game.clears} 回`,
     `最長 ${game.longest}`,
-    `ミス ${game.misses} 回`,
+    `不成立 ${game.misses} 回`,
   ].join("　");
 }
 

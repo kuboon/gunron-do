@@ -30,6 +30,7 @@ import {
   reducedLength,
   slerp,
 } from "./rotation.ts";
+import { sound } from "./sound.ts";
 
 /** The board is square, and small enough that every cell is in reach of a thumb. */
 export const WIDTH = 5;
@@ -38,11 +39,11 @@ export const HEIGHT = 5;
 /** One round. Long enough to find a few long traces, short enough to want the next round. */
 export const ROUND_MS = 90_000;
 
-/** What a trace that does not come home costs. */
-export const MISS_PENALTY_MS = 5_000;
-
 /** Where the time bar starts reading as nearly over. */
 export const LOW_TIME_MS = 15_000;
+
+/** Where it starts counting out loud, and the screen starts pressing. */
+export const URGENT_MS = 10_000;
 
 /** Where the round is in its life, which is also which overlay is up. */
 export type Phase = "ready" | "playing" | "over";
@@ -55,6 +56,42 @@ export type Phase = "ready" | "playing" | "over";
  * five seconds off it. One of these is what makes that happen — the text to float, and when, so
  * the HUD can work out how far along the animation is on the frame it is drawing.
  */
+/** One cleared cell, as the sparks coming off it need it. */
+export interface BurstCell {
+  /** Where it was on the board. */
+  index: number;
+  /** What it held, which is what colour its sparks are. */
+  op: Op;
+}
+
+/**
+ * The sparks a clear throws, one handful per cell that went.
+ *
+ * The cells are copied rather than looked up later, because by the time the sparks are half way
+ * out the board has closed over the holes and those positions hold different cells.
+ */
+export interface Burst {
+  /** New with every clear, so the board can tell one burst's sparks from the next's. */
+  id: number;
+  cells: readonly BurstCell[];
+  /** How big a deal it was. How many sparks that is worth is the board's to decide. */
+  strength: "medium" | "large";
+}
+
+/**
+ * How hard something knocked the board.
+ *
+ * A name rather than a number of pixels: how important the event was is the game's to say, and
+ * how far that moves the board is the board's.
+ */
+export type Knock = "cancel" | "medium" | "large";
+
+/** A knock to the board, and which one it is. */
+export interface Shake {
+  id: number;
+  strength: Knock;
+}
+
 export interface Pop {
   /** New with every pop, so the HUD can tell a second one from the first. */
   id: number;
@@ -102,10 +139,25 @@ const RIGHTING_DELAY_MS = 200;
 const RIGHTING_MS = 260;
 
 /** How long a cleared cell takes to shrink away, before the board closes over it. */
-const POP_MS = 220;
+const POP_MS = 260;
 
-/** How long the board shakes its head after a miss. */
-const SHAKE_MS = 300;
+/** How long the sparks off a cleared cell live. Their own animation is a shade shorter. */
+const BURST_MS = 780;
+
+/** How long the board shakes. Long enough to feel, short enough not to be in the way. */
+const SHAKE_MS = 340;
+
+/**
+ * The hold on a clear, in milliseconds: the whole game stops for a moment.
+ *
+ * A freeze frame is the cheapest way to make a hit land — the eye reads the pause as weight. It
+ * stops the clock as well as the animation, which is a few hundredths of a second in the
+ * player's favour and worth it.
+ */
+const HIT_STOP_MS = { medium: 60, large: 110 } as const;
+
+/** A trace long enough to be worth the full treatment. */
+const LARGE_CLEAR = 5;
 
 /** A seeded generator, so a date can be a board. */
 function mulberry32(seed: number): () => number {
@@ -148,11 +200,14 @@ export class TetraDo {
   #misses = 0;
   #timeLeft = ROUND_MS;
   #phase: Phase = "ready";
-  #shaking = false;
   #scorePop: Pop | null = null;
   #longestPop: Pop | null = null;
-  #timePop: Pop | null = null;
   #popId = 0;
+  #burst: Burst | null = null;
+  #shake: Shake | null = null;
+  #effectId = 0;
+  #hitStop = 0;
+  #spokenSecond = 0;
   #daily = true;
   #seedLabel = "";
 
@@ -219,13 +274,13 @@ export class TetraDo {
   get longestPop(): Pop | null {
     return this.#longestPop;
   }
-  /** The last time a miss took five seconds off the clock. */
-  get timePop(): Pop | null {
-    return this.#timePop;
+  /** The sparks thrown by the cells that just cleared, or `null` between clears. */
+  get burst(): Burst | null {
+    return this.#burst;
   }
-  /** True for the moment after a miss, which is the board shaking its head. */
-  get shaking(): boolean {
-    return this.#shaking;
+  /** The board's current knock, or `null` when it is still. */
+  get shake(): Shake | null {
+    return this.#shake;
   }
   get live(): boolean {
     return this.#live;
@@ -301,7 +356,10 @@ export class TetraDo {
     this.#phase = "playing";
     this.#scorePop = null;
     this.#longestPop = null;
-    this.#timePop = null;
+    this.#burst = null;
+    this.#shake = null;
+    this.#hitStop = 0;
+    this.#spokenSecond = 0;
     this.#resetSolid();
     this.#emit();
   }
@@ -320,6 +378,7 @@ export class TetraDo {
   beginTrace(index: number): void {
     if (this.#phase !== "playing" || this.#leaving(index)) return;
     this.#path = [index];
+    sound.step(0);
     if (this.#live) {
       this.#resetSolid();
       this.#turn(this.#cells[index].op, TURN_MS);
@@ -341,6 +400,7 @@ export class TetraDo {
 
     if (this.#path.length >= 2 && index === this.#path[this.#path.length - 2]) {
       this.#path.pop();
+      sound.back(this.#path.length);
       if (this.#live) this.#turn(opInverse(this.#cells[last].op), TURN_MS);
       this.#emit();
       return;
@@ -351,6 +411,7 @@ export class TetraDo {
       this.#leaving(index)
     ) return;
     this.#path.push(index);
+    sound.step(this.#path.length - 1);
     if (this.#live) this.#turn(this.#cells[index].op, TURN_MS);
     this.#emit();
   }
@@ -375,19 +436,15 @@ export class TetraDo {
     }
 
     const reduced = reducedLength(word);
-    if (isIdentity(compose(word))) {
-      if (reduced >= MIN_REDUCED_LENGTH) this.#clear(reduced);
-      else {
-        // Nothing but cancellations: the solid did come home, so this is not a miss and costs
-        // nothing. The dim line the player was drawing already said it would not clear.
-        this.#path = [];
-        this.#rightSolid();
-        this.#emit();
-      }
+    if (isIdentity(compose(word)) && reduced >= MIN_REDUCED_LENGTH) {
+      this.#clear(reduced);
       return;
     }
 
-    this.#miss();
+    // Everything else is the same thing to a player: the trace did not clear, so it is undone.
+    // It costs nothing but the time it took — a trace that only cancels itself, and one that
+    // simply does not come home, are both just traces that are not there any more.
+    this.#cancel();
   }
 
   /** Whether a cell is mid-clear, and so not part of the board any more. */
@@ -395,9 +452,21 @@ export class TetraDo {
     return this.#popping.has(this.#cells[index].id);
   }
 
+  /**
+   * A trace that came home, and everything that goes off at once because it did.
+   *
+   * Seven things, inside a tenth of a second: the score jumps, the cells shrink, sparks come off
+   * them, the board takes a knock, the floor flashes under the solid, the game holds still for a
+   * moment, and the arpeggio runs. None of them is much on its own; together they are the reason
+   * to look for a long trace rather than three short ones — which is also why every one of them
+   * is bigger for a long trace than a short one.
+   *
+   * @param reduced The trace's length once the cancellations are out: what it scored on
+   */
   #clear(reduced: number): void {
     const gain = reduced * reduced;
     const record = reduced > this.#longest;
+    const tier = reduced >= LARGE_CLEAR ? "large" : "medium";
 
     this.#score += gain;
     this.#clears += 1;
@@ -410,6 +479,18 @@ export class TetraDo {
 
     const removed = new Set(this.#path);
     this.#popping = new Set([...removed].map((index) => this.#cells[index].id));
+    this.#burst = {
+      id: ++this.#effectId,
+      cells: [...removed].map((index) => ({
+        index,
+        op: this.#cells[index].op,
+      })),
+      strength: tier,
+    };
+    this.#knock(tier);
+    this.#hitStop = HIT_STOP_MS[tier];
+    sound.clear(reduced);
+
     this.#path = [];
     this.#emit();
 
@@ -418,6 +499,14 @@ export class TetraDo {
       this.#popping = new Set();
       this.#emit();
     }, POP_MS);
+
+    const burstId = this.#burst.id;
+    setTimeout(() => {
+      // Only if nothing has cleared since: a burst that was replaced is not this one's to clear.
+      if (this.#burst?.id !== burstId) return;
+      this.#burst = null;
+      this.#emit();
+    }, BURST_MS);
   }
 
   /**
@@ -439,34 +528,44 @@ export class TetraDo {
     }
   }
 
-  #miss(): void {
+  /**
+   * A trace that did not clear, undone.
+   *
+   * It costs nothing but the seconds it took to draw. A time penalty on top would punish the
+   * thing the game wants a player to do — try a long trace and find out — so what is left is
+   * the smallest knock the board can give and a sound that is over before it is noticed.
+   */
+  #cancel(): void {
     this.#misses += 1;
-    this.#timeLeft -= MISS_PENALTY_MS;
-    this.#timePop = this.#pop("−5秒");
-
     this.#path = [];
     this.#rightSolid();
-    this.#shake();
+    this.#knock("cancel");
+    sound.cancel();
     this.#emit();
+  }
+
+  /**
+   * Knocks the board, and lets it settle.
+   *
+   * The strength goes to the renderer and the decay is in the animation, so a knock always ends
+   * — this flag is only how the next one gets to start again.
+   *
+   * @param strength How hard, as a name the board turns into pixels
+   */
+  #knock(strength: Knock): void {
+    const id = ++this.#effectId;
+    this.#shake = { id, strength };
+    setTimeout(() => {
+      if (this.#shake?.id === id) {
+        this.#shake = null;
+        this.#emit();
+      }
+    }, SHAKE_MS);
   }
 
   /** A number's next jump, stamped so the HUD can age it. */
   #pop(text: string): Pop {
     return { id: ++this.#popId, text, at: performance.now() };
-  }
-
-  /**
-   * Shakes the board, and stops.
-   *
-   * A flag rather than a class the island toggles by hand: the animation runs while it is set, and
-   * turning it off again is what lets the next miss run it again.
-   */
-  #shake(): void {
-    this.#shaking = true;
-    setTimeout(() => {
-      this.#shaking = false;
-      this.#emit();
-    }, SHAKE_MS);
   }
 
   // --- the solid -------------------------------------------------------------
@@ -546,20 +645,38 @@ export class TetraDo {
     const dt = Math.min(64, now - this.#last);
     this.#last = now;
 
-    if (this.#phase === "playing") {
+    // The hold after a clear. Everything stops — the clock, the solid, the sparks' own clock is
+    // the browser's — and the frame still goes out, so the freeze is a frame the player sees
+    // rather than a stall they feel.
+    if (this.#hitStop > 0) {
+      this.#hitStop -= dt;
+    } else if (this.#phase === "playing") {
       this.#timeLeft -= dt;
+      this.#countdown();
       if (this.#timeLeft <= 0) {
         this.#timeLeft = 0;
         this.#phase = "over";
         this.#path = [];
+        sound.over();
         this.#emit();
       }
+      this.#advance(dt);
+    } else {
+      this.#advance(dt);
     }
 
-    this.#advance(dt);
     for (const listener of this.#frameListeners) listener();
     this.#frame = requestAnimationFrame(this.#tick);
   };
+
+  /** Once a second, out loud, for the last ten of them. */
+  #countdown(): void {
+    if (this.#timeLeft > URGENT_MS) return;
+    const seconds = Math.ceil(this.#timeLeft / 1000);
+    if (seconds === this.#spokenSecond || seconds <= 0) return;
+    this.#spokenSecond = seconds;
+    sound.tick(seconds);
+  }
 
   /** Moves the solid one frame along whatever it is doing. */
   #advance(dt: number): void {

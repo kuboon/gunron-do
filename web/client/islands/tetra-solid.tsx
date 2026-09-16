@@ -42,6 +42,9 @@ export const TetraSolid = clientEntry(
         <svg
           viewBox={VIEW_BOX}
           mix={solidStyle}
+          // A push outward on a clear, fading with the flash: the solid reacting to the thing it
+          // just did, rather than only reporting it.
+          style={{ transform: `scale(${1 + 0.07 * flash})` }}
           role="img"
           aria-label="正四面体のいまの向き"
         >
@@ -172,4 +175,5 @@ const solidStyle = css({
   display: "block",
   width: "100%",
   height: "100%",
+  transformOrigin: "center",
 });
