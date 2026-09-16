@@ -34,8 +34,6 @@ export const assets = await createAssetServer({
     // decision; naming it again here would only be a second place to keep it. `islands/_lib/` is
     // left out by depth, which is a better rule than the underscore.
     "islands/*.tsx",
-    // Showcase: delete this line when you delete the showcase — see README.
-    "islands/showcase/*.tsx",
   ],
   basePath: assetsPath,
   mode: "bundle",

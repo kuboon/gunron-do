@@ -10,10 +10,14 @@
  * half has the runtime — the file reads, the bundler, the environment — and hands the other half
  * what it needs to render.
  *
+ * A game is two routes. The game itself is named one at a time, because a screen someone wrote is
+ * not a row in a table; its rules are a single `:game` route, because every game's rules are the
+ * same page with a different Markdown file behind it. `client/games.ts` is the list both are kept
+ * honest against, and an unknown slug is a `404` rather than a file read.
+ *
  * The rest of the site is mapped the same way as a page. The browser modules and the files under
  * `client/static/` are directories rather than pages, so each is one wildcard route handing off to
- * the thing that serves it; the Markdown articles are not a directory at all here — `blog/` answers
- * its routes like any other page.
+ * the thing that serves it.
  *
  * So what is exported is a plain `@remix-run/fetch-router` router. `deno serve router.ts` runs it
  * as the dev server and the build crawls the same object; both need only `fetch`. Nothing here is a
@@ -27,19 +31,16 @@ import { createFileTree, githubPages } from "@remix-kbn/ssg/site";
 import type { FileServerBehavior } from "@remix-kbn/ssg/site";
 
 import { assets, assetsPath } from "./assets.ts";
+import { readRules, rulesImage } from "./games/mod.ts";
 import { ogImage, ogPaths, serveOgImage } from "./og/mod.ts";
 import { base } from "../client/base.ts";
+import { findGame } from "../client/games.ts";
 import { Layout } from "../client/layout.tsx";
 import { routes } from "../client/routes.ts";
 
-import * as About from "../client/pages/about.tsx";
-import { blogController } from "./blog/mod.ts";
-// Fullscreen demo: delete this import when you delete the demo — see README.
-import * as Fullscreen from "../client/pages/fullscreen.tsx";
 import * as Home from "../client/pages/index.tsx";
-// Showcase: delete these two imports when you delete the showcase — see README.
-import * as Showcase from "../client/pages/showcase.tsx";
-import { versions } from "./versions.ts";
+import * as TetraDo from "../client/pages/tetra-do.tsx";
+import RulesPage from "../client/pages/rules.tsx";
 
 /** Deploy path prefix. The build strips it back off when writing, so output lands at the root. */
 export { base };
@@ -56,6 +57,10 @@ interface Page {
   hydrate?: boolean;
   /** Set by a page that needs a viewport meta of its own — `viewport-fit=cover`, in practice. */
   viewport?: string;
+  /** Set by a page that wants the screen rather than the site's header and footer. */
+  chrome?: "site" | "bare";
+  /** What a `bare` page paints the document, so an overscroll shows its colour and not the site's. */
+  background?: string;
 }
 
 /**
@@ -66,7 +71,7 @@ interface Page {
  * so there is one place where a page says what it is called.
  *
  * @param route The route this page answers, for its card's URL
- * @param page The page module — its component, its title, and whether it hydrates
+ * @param page The page module — its component, its title, and how it wants to be framed
  * @returns An action for `router.get`
  */
 function pageAction(route: { href(): string }, page: Page) {
@@ -79,6 +84,8 @@ function pageAction(route: { href(): string }, page: Page) {
         description: page.description,
         image,
         viewport: page.viewport,
+        chrome: page.chrome,
+        background: page.background,
         script: page.hydrate ? clientRuntime : null,
         children: page.default(),
       }),
@@ -124,8 +131,8 @@ const router = createRouter({ middleware: [render({ assets })] });
 /** The request context those middlewares produce — `context.render`, in practice. */
 export type AppContext = RouterContext<typeof router>;
 
-// So `createController()` in `blog/mod.ts` types its actions against this app's context rather than
-// the bare default. One augmentation for the whole app, which is what a single-router app has.
+// So the actions below type against this app's context rather than the bare default. One
+// augmentation for the whole app, which is what a single-router app has.
 declare module "@remix-run/fetch-router" {
   interface RouterTypes {
     context: AppContext;
@@ -133,24 +140,33 @@ declare module "@remix-run/fetch-router" {
 }
 
 router.get(routes.home, pageAction(routes.home, Home));
-router.get(routes.about, pageAction(routes.about, About));
-// Fullscreen demo: delete this line when you delete the demo — see README.
-router.get(routes.fullscreen, pageAction(routes.fullscreen, Fullscreen));
-// Both blog routes at once: the listing, and one article.
-router.map(routes.blog, blogController);
-// Showcase: delete this line when you delete the showcase — see README. It has an action of its
-// own because its badges are read off the import map, which a page in `client/` cannot open.
-const showcaseImage = ogImage(routes.showcase.href(), Showcase);
-router.get(routes.showcase, (context) =>
-  context.render(
+// One line per game. The screen is bespoke, so it is named here rather than looked up.
+router.get(routes.tetraDo, pageAction(routes.tetraDo, TetraDo));
+
+// Every game's rules, from the Markdown file named after it. A slug that is not a game never
+// becomes a file name: `findGame` answers first, and a `404` reads as "not mine" to `compose`,
+// which is what an unknown game is.
+router.get(routes.rules, async (context) => {
+  const game = findGame(context.params.game);
+  const rules = game === null ? null : await readRules(game);
+  if (rules === null) {
+    return new Response("Not Found", {
+      status: 404,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  return context.render(
     Layout({
-      title: Showcase.title,
-      description: Showcase.description,
-      image: showcaseImage,
-      script: Showcase.hydrate ? clientRuntime : null,
-      children: Showcase.default(versions()),
+      title: `${rules.title} — gunron-do`,
+      description: rules.summary,
+      image: rulesImage(rules.game),
+      // Rules are text: the page places no island, so it ships no JavaScript at all.
+      script: null,
+      children: RulesPage({ game: rules.game, body: rules.body }),
     }),
-  ));
+  );
+});
 
 // The three directories, each under its own prefix. A wildcard route is all it takes to hand a
 // subtree to something that already serves one. `og/` is a directory only in the finished site —
@@ -162,8 +178,8 @@ router.map(`${base}/og/*path`, ({ request }) => serveOgImage(request));
 /**
  * Where the crawl starts.
  *
- * Everything else is reached by following links, so the blog index listing its articles is what
- * makes them part of the site.
+ * Everything else is reached by following links, so the home page listing the games is what makes
+ * them part of the site.
  *
  * The social cards are the exception, and the reason this is a list rather than just `/`: nothing
  * on the site links to one. An `og:image` is an absolute URL meant for someone else's server, so a
