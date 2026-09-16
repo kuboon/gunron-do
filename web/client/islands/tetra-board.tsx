@@ -9,18 +9,16 @@
  * The cells are keyed by the identity the game gives them, which is what makes the board move
  * without anything here animating it: a cell that falls into the row below is the same key in a
  * new place, so `animateLayout` slides it, and a cell dealt into the top is a new key, so
- * `animateEntrance` drops it in. Cleared cells are gone from the state the moment they clear, and
- * `animateExit` is what keeps them on screen long enough to see them go.
+ * `animateEntrance` drops it in. A cleared cell is neither — it shrinks where it stands, and the
+ * board closes over it only once it has gone. Animating it out of the grid instead would leave
+ * the grid a different length for as long as the animation ran, and every cell after the gap
+ * would slide into it and back out again.
  *
  * What it reads is the game; what it writes is three calls on it. No rule is decided here.
  */
 
 import { clientEntry, css, type Handle, on, ref } from "@remix-run/ui";
-import {
-  animateEntrance,
-  animateExit,
-  animateLayout,
-} from "@remix-run/ui/animation";
+import { animateEntrance, animateLayout } from "@remix-run/ui/animation";
 
 import { game, HEIGHT, WIDTH } from "../games/tetra-do/game.ts";
 import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
@@ -130,6 +128,7 @@ export const TetraBoard = clientEntry(
 
     return () => {
       const path = game.path;
+      const popping = game.popping;
       const word = game.word;
       const reduced = reducedLength(word);
 
@@ -177,19 +176,10 @@ export const TetraBoard = clientEntry(
                     transform: "translateY(-40%)",
                     duration: 220,
                   }),
-                  animateExit({
-                    opacity: 0,
-                    transform: "scale(0.2)",
-                    duration: 200,
-                  }),
                   animateLayout(),
                 ]}
               >
-                <div
-                  mix={path.includes(index)
-                    ? [faceStyle, faceTracedStyle]
-                    : [faceStyle]}
-                >
+                <div mix={faceMix(popping.has(cell.id), path.includes(index))}>
                   {glyph(cell.op)}
                 </div>
               </div>
@@ -303,6 +293,12 @@ function glyph(op: Op) {
   );
 }
 
+/** A cell's face: on its way out, being traced, or neither. */
+function faceMix(leaving: boolean, traced: boolean) {
+  if (leaving) return [faceStyle, facePoppingStyle];
+  return traced ? [faceStyle, faceTracedStyle] : [faceStyle];
+}
+
 // --- styles -----------------------------------------------------------------
 
 const wrapStyle = css({
@@ -340,12 +336,20 @@ const faceStyle = css({
   height: "100%",
   borderRadius: "10px",
   background: surface.cell,
-  transition: "transform 120ms, background 120ms",
+  // On the face rather than on the cell around it, because that one is what `animateLayout` moves
+  // — two transforms on one element, and the one that does not know about the other wins.
+  transition: "transform 120ms, background 120ms, opacity 200ms",
 });
 
 const faceTracedStyle = css({
   transform: "scale(0.9)",
   background: surface.cellActive,
+});
+
+/** Cleared, and shrinking away in the slot it still holds. */
+const facePoppingStyle = css({
+  transform: "scale(0.2)",
+  opacity: 0,
 });
 
 const glyphStyle = css({ display: "block", width: "100%", height: "100%" });

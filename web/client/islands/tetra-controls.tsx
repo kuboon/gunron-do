@@ -75,6 +75,9 @@ export const TetraControls = clientEntry(
                   得点は、隣り合う打ち消し（<code>a a⁻¹</code>{" "}
                   など）を除いた長さの2乗です。除いた長さが3未満の経路は消えません。外れると5秒減ります。
                 </p>
+                <p mix={cardTextStyle}>
+                  「なぞり中に立体を回す」をオフにすると、立体は指を離してから答え合わせとして動きます。
+                </p>
                 <button
                   type="button"
                   mix={[primaryStyle, on("click", () => game.startDaily())]}
@@ -162,6 +165,15 @@ const cardTextStyle = css({
   margin: "0 0 0.75rem",
   color: "#cbd1e4",
   fontSize: "0.95rem",
+  // The site's base layer paints `code` for a light document; on the card it has to be a chip cut
+  // out of the dark rather than a white one laid on it.
+  "& code": {
+    background: "rgba(237, 239, 247, 0.1)",
+    color: ink.text,
+    padding: "0.05rem 0.3rem",
+    borderRadius: "4px",
+    fontSize: "0.9em",
+  },
 });
 
 const bigStyle = css({

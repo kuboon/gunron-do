@@ -91,6 +91,9 @@ const REPLAY_TURN_MS = 110;
 const RIGHTING_DELAY_MS = 200;
 const RIGHTING_MS = 260;
 
+/** How long a cleared cell takes to shrink away, before the board closes over it. */
+const POP_MS = 220;
+
 /** How long the board shakes its head after a miss. */
 const SHAKE_MS = 300;
 
@@ -127,6 +130,7 @@ export class TetraDo {
   #cells: Cell[] = [];
   #nextId = 0;
   #path: number[] = [];
+  #popping = new Set<number>();
 
   #score = 0;
   #longest = 0;
@@ -207,6 +211,16 @@ export class TetraDo {
   get seedLabel(): string {
     return this.#seedLabel;
   }
+  /**
+   * The cells on their way out, by id.
+   *
+   * They are still on the board while they shrink: taking them out first would leave the grid
+   * twenty-two cells long for a fifth of a second, and every cell below the gap would slide
+   * sideways into it and back out again.
+   */
+  get popping(): ReadonlySet<number> {
+    return this.#popping;
+  }
   /** Where the solid is drawn right now — part-way through a turn, most of the time. */
   get orientation(): Quat {
     return this.#shown;
@@ -280,7 +294,7 @@ export class TetraDo {
 
   /** Starts a trace at a cell. */
   beginTrace(index: number): void {
-    if (this.#phase !== "playing") return;
+    if (this.#phase !== "playing" || this.#leaving(index)) return;
     this.#path = [index];
     if (this.#live) {
       this.#resetSolid();
@@ -308,7 +322,10 @@ export class TetraDo {
       return;
     }
 
-    if (this.#path.includes(index) || !adjacent(index, last)) return;
+    if (
+      this.#path.includes(index) || !adjacent(index, last) ||
+      this.#leaving(index)
+    ) return;
     this.#path.push(index);
     if (this.#live) this.#turn(this.#cells[index].op, TURN_MS);
     this.#emit();
@@ -348,6 +365,11 @@ export class TetraDo {
     this.#miss(word);
   }
 
+  /** Whether a cell is mid-clear, and so not part of the board any more. */
+  #leaving(index: number): boolean {
+    return this.#popping.has(this.#cells[index].id);
+  }
+
   #clear(reduced: number): void {
     const gain = reduced * reduced;
     this.#score += gain;
@@ -360,9 +382,15 @@ export class TetraDo {
     this.#queue.push({ kind: "flash" });
 
     const removed = new Set(this.#path);
+    this.#popping = new Set([...removed].map((index) => this.#cells[index].id));
     this.#path = [];
-    this.#collapse(removed);
     this.#emit();
+
+    setTimeout(() => {
+      this.#collapse(removed);
+      this.#popping = new Set();
+      this.#emit();
+    }, POP_MS);
   }
 
   /**

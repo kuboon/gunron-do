@@ -32,7 +32,6 @@ export const TetraHud = clientEntry(
             <span>
               得点<b mix={valueStyle}>{game.score}</b>
             </span>
-            <span mix={seedStyle}>{game.seedLabel}</span>
             <span mix={rightStyle}>
               最長<b mix={valueStyle}>{game.longest}</b>
             </span>
@@ -73,15 +72,6 @@ const valueStyle = css({
   fontSize: "1.35rem",
   fontVariantNumeric: "tabular-nums",
   marginLeft: "0.35rem",
-});
-
-const seedStyle = css({
-  flex: "1 1 auto",
-  textAlign: "center",
-  fontSize: "0.8rem",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
 });
 
 const rightStyle = css({ marginLeft: "auto" });

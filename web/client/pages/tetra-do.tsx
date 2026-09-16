@@ -1,7 +1,8 @@
 /**
  * テトラ道 — the game, with the screen to itself.
  *
- * The page is a layout and four islands: the solid, the clock, the board, and the buttons. Nothing
+ * The page is a layout and five islands: the solid, the clock, the board, the buttons, and the
+ * label saying which board this is. Nothing
  * of the game is decided here; `games/tetra-do/` holds the rules and the islands read them, which
  * is what lets this file be the one place that says where each part goes.
  *
@@ -22,6 +23,7 @@ import { css, type RemixNode } from "@remix-run/ui";
 import { TetraBoard } from "../islands/tetra-board.tsx";
 import { TetraControls } from "../islands/tetra-controls.tsx";
 import { TetraHud } from "../islands/tetra-hud.tsx";
+import { TetraSeed } from "../islands/tetra-seed.tsx";
 import { TetraSolid } from "../islands/tetra-solid.tsx";
 import { findGame } from "../games.ts";
 import { ink, surface } from "../games/tetra-do/palette.ts";
@@ -32,7 +34,7 @@ const game = findGame("tetra-do")!;
 export const title = `${game.title} — gunron-do`;
 export const description = game.description;
 
-/** Four islands, so the runtime boots. */
+/** Islands, so the runtime boots. */
 export const hydrate = true;
 
 /** The screen is the game, and the game is dark. */
@@ -48,10 +50,7 @@ export default function TetraDoPage(): RemixNode {
     <div mix={screenStyle}>
       <header mix={headStyle}>
         <h1 mix={titleStyle}>{game.title}</h1>
-        <nav mix={navStyle}>
-          <a mix={linkStyle} href={game.rulesHref}>ルール</a>
-          <a mix={linkStyle} href={routes.home.href()}>gunron-do</a>
-        </nav>
+        <TetraSeed />
       </header>
 
       <div mix={hudAreaStyle}>
@@ -66,6 +65,11 @@ export default function TetraDoPage(): RemixNode {
       <div mix={controlsAreaStyle}>
         <TetraControls />
       </div>
+
+      <nav mix={navStyle}>
+        <a mix={linkStyle} href={game.rulesHref}>ルールを読む</a>
+        <a mix={linkStyle} href={routes.home.href()}>gunron-do</a>
+      </nav>
     </div>
   );
 }
@@ -94,13 +98,14 @@ const screenStyle = css({
   color: ink.text,
   fontFamily:
     '"Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif',
-  gridTemplateAreas: `"head" "hud" "solid" "board" "controls"`,
+  gridTemplateAreas: `"head" "hud" "solid" "board" "controls" "nav"`,
 
   "@media (min-width: 52rem)": {
     width: "min(96vw, 56rem)",
     gridTemplateColumns: "1fr 27rem",
     columnGap: "2rem",
-    gridTemplateAreas: `"head head" "solid hud" "solid board" "solid controls"`,
+    gridTemplateAreas:
+      `"head head" "solid hud" "solid board" "solid controls" "solid nav"`,
   },
 });
 
@@ -120,9 +125,11 @@ const titleStyle = css({
 });
 
 const navStyle = css({
+  gridArea: "nav",
   display: "flex",
-  gap: "1rem",
-  fontSize: "0.9rem",
+  gap: "1.25rem",
+  marginTop: "0.4rem",
+  fontSize: "0.85rem",
 });
 
 const linkStyle = css({
