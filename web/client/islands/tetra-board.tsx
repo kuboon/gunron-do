@@ -15,9 +15,9 @@
  * would slide into it and back out again.
  *
  * The line the finger leaves is the one place the scoring is visible while it can still be
- * changed. A move that cancels its neighbour is worth nothing, so the segments around it go thin,
- * dim and dashed, and the cells under them lose their highlight — a trace that is nothing but
- * cancellation looks like nothing before the finger comes up, which is the moment it is still
+ * changed. A move that cancels its neighbour is worth nothing, so its cell loses its highlight and
+ * the link between the two struck-out moves goes thin, dim and dashed — a trace that is nothing
+ * but cancellation looks like nothing before the finger comes up, which is the moment it is still
  * worth knowing.
  *
  * What it reads is the game; what it writes is three calls on it. No rule is decided here.
@@ -231,7 +231,10 @@ export const TetraBoard = clientEntry(
                   )}
                 {path.slice(1).map((to, step) => {
                   const from = center(path[step]);
-                  const dead = cancelled[step] || cancelled[step + 1];
+                  // Both ends, not either: the step from a move that counts into one that does not
+                  // is still the trace going somewhere. Only the link between two struck-out moves
+                  // is the part that adds nothing.
+                  const dead = cancelled[step] && cancelled[step + 1];
                   const [x2, y2] = center(to);
                   return (
                     <line
