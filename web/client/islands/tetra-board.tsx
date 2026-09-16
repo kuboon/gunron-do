@@ -15,9 +15,9 @@
  * would slide into it and back out again.
  *
  * The line the finger leaves is the one place the scoring is visible while it can still be
- * changed. A move that cancels its neighbour is worth nothing, so the segments around it go thin,
- * dim and dashed, and the cells under them lose their highlight — a trace that is nothing but
- * cancellation looks like nothing before the finger comes up, which is the moment it is still
+ * changed. A move that cancels its neighbour is worth nothing, so its cell loses its highlight and
+ * the link between the two struck-out moves goes thin, dim and dashed — a trace that is nothing
+ * but cancellation looks like nothing before the finger comes up, which is the moment it is still
  * worth knowing.
  *
  * What it reads is the game; what it writes is three calls on it. No rule is decided here.
@@ -26,7 +26,13 @@
 import { clientEntry, css, type Handle, on, ref } from "@remix-run/ui";
 import { animateEntrance, animateLayout } from "@remix-run/ui/animation";
 
-import { game, HEIGHT, WIDTH } from "../games/tetra-do/game.ts";
+import {
+  type Burst,
+  type BurstCell,
+  game,
+  HEIGHT,
+  WIDTH,
+} from "../games/tetra-do/game.ts";
 import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
 import {
   freeReduction,
@@ -139,8 +145,13 @@ export const TetraBoard = clientEntry(
       // a trace that is all cancellation looks like what it is before the finger comes up.
       const { cancelled } = freeReduction(game.word);
 
+      const shake = game.shake;
+      const burst = game.burst;
+
       return (
-        <div mix={game.shaking ? [wrapStyle, shakeStyle] : [wrapStyle]}>
+        <div
+          mix={shake ? [wrapStyle, knockStyles[shake.strength]] : [wrapStyle]}
+        >
           <div
             mix={[
               boardStyle,
@@ -199,16 +210,31 @@ export const TetraBoard = clientEntry(
             ))}
           </div>
 
-          {path.length >= 2 && width > 0
+          {burst === null ? null : (
+            <div
+              key={`flash-${burst.id}`}
+              mix={flashStyles[burst.strength]}
+            />
+          )}
+
+          {(path.length >= 2 || burst !== null) && width > 0
             ? (
               <svg
                 mix={lineStyle}
                 viewBox={`0 0 ${width} ${height}`}
                 aria-hidden="true"
               >
+                {burst === null
+                  ? null
+                  : burst.cells.flatMap((cell) =>
+                    sparks(cell, burst, center(cell.index), cellSize())
+                  )}
                 {path.slice(1).map((to, step) => {
                   const from = center(path[step]);
-                  const dead = cancelled[step] || cancelled[step + 1];
+                  // Both ends, not either: the step from a move that counts into one that does not
+                  // is still the trace going somewhere. Only the link between two struck-out moves
+                  // is the part that adds nothing.
+                  const dead = cancelled[step] && cancelled[step + 1];
                   const [x2, y2] = center(to);
                   return (
                     <line
@@ -236,6 +262,72 @@ export const TetraBoard = clientEntry(
     };
   },
 );
+
+/**
+ * What comes off one cleared cell: a ring, and a handful of sparks in the cell's own colour.
+ *
+ * CSS animations rather than SVG's own `<animate>`, which looks like the obvious choice and is a
+ * trap: SMIL times from the start of the *document's* timeline, so an animation element inserted
+ * a minute into a round begins already finished. A CSS animation starts when the element does.
+ *
+ * Each spark's direction is baked into a custom property and the keyframes are shared, so a burst
+ * of a hundred sparks is one rule and a hundred inline values rather than a hundred rules. The
+ * direction comes from the spark's own index rather than from `Math.random`, so a board that
+ * re-renders mid-flight draws the same burst rather than scattering it again.
+ *
+ * @param cell Which cell went, and what it held
+ * @param burst The burst it belongs to, for the key and the count
+ * @param center Where the cell was, in the overlay's pixels
+ * @param size The width of a cell, which is the scale all of this is in
+ */
+function sparks(
+  cell: BurstCell,
+  burst: Burst,
+  [cx, cy]: [number, number],
+  size: number,
+) {
+  const color = OP_COLORS[opBase(cell.op)];
+
+  const count = SPARKS[burst.strength];
+
+  const flying = Array.from({ length: count }, (_, i) => {
+    const angle = (i / count) * Math.PI * 2 + cell.index * 0.7;
+    const reach = size * (0.85 + 0.75 * (((i * 7) % 5) / 4));
+    const radius = size * 0.12 * (1 - (i % 3) * 0.16);
+
+    return (
+      <circle
+        key={`${burst.id}-${cell.index}-${i}`}
+        mix={sparkStyle}
+        cx={cx}
+        cy={cy}
+        r={radius.toFixed(2)}
+        fill={color}
+        style={{
+          "--tetra-dx": `${(Math.cos(angle) * reach).toFixed(1)}px`,
+          "--tetra-dy": `${(Math.sin(angle) * reach).toFixed(1)}px`,
+        }}
+      />
+    );
+  });
+
+  return [
+    <circle
+      key={`${burst.id}-${cell.index}-ring`}
+      mix={shockStyle}
+      cx={cx}
+      cy={cy}
+      r={(size * 0.42).toFixed(2)}
+      fill="none"
+      stroke={color}
+      stroke-width={(size * 0.16).toFixed(2)}
+    />,
+    ...flying,
+  ];
+}
+
+/** How many sparks a cleared cell throws, by how much the clear was worth. */
+const SPARKS = { medium: 10, large: 16 } as const;
 
 /**
  * One cell's face: the floor triangle, with the corner this move turns about marked.
@@ -318,13 +410,62 @@ const wrapStyle = css({
   gap: "0.5rem",
 });
 
-const shakeStyle = css({
-  "@keyframes tetra-shake": {
-    "25%": { transform: "translateX(-6px)" },
-    "75%": { transform: "translateX(6px)" },
-  },
-  animation: "tetra-shake 300ms",
-});
+/**
+ * The swings of a knock, decaying to nothing.
+ *
+ * Each swing is a fraction of the one before it, so the board always comes back to where it was
+ * and a knock never becomes its new resting place.
+ *
+ * @param amplitude Pixels at the first swing
+ */
+function swings(amplitude: number) {
+  const at = (x: number, y: number) =>
+    `translate3d(${(amplitude * x).toFixed(2)}px, ${
+      (amplitude * y).toFixed(2)
+    }px, 0)`;
+
+  return {
+    "0%": { transform: "translate3d(0, 0, 0)" },
+    "15%": { transform: at(-1, 0.4) },
+    "32%": { transform: at(0.8, -0.35) },
+    "50%": { transform: at(-0.55, 0.2) },
+    "68%": { transform: at(0.34, -0.12) },
+    "84%": { transform: at(-0.16, 0) },
+    "100%": { transform: "translate3d(0, 0, 0)" },
+  };
+}
+
+/** The curve of a hit: fast out, slow back. */
+const KNOCK = "340ms cubic-bezier(.36,.07,.19,.97)";
+
+/** Shake is the first thing to go for a player who asked for less motion. */
+const STILL = {
+  "@media (prefers-reduced-motion: reduce)": { animation: "none" },
+};
+
+/**
+ * One rule per strength, because a keyframe rule needs a name it can be written down with.
+ *
+ * Three sizes is the whole scale: a trace that did not clear barely nudges the board, an
+ * ordinary clear knocks it, and a long one hits it.
+ */
+const knockStyles = {
+  cancel: css({
+    "@keyframes tetra-knock-cancel": swings(4),
+    animation: `tetra-knock-cancel ${KNOCK}`,
+    ...STILL,
+  }),
+  medium: css({
+    "@keyframes tetra-knock-medium": swings(7),
+    animation: `tetra-knock-medium ${KNOCK}`,
+    ...STILL,
+  }),
+  large: css({
+    "@keyframes tetra-knock-large": swings(11),
+    animation: `tetra-knock-large ${KNOCK}`,
+    ...STILL,
+  }),
+} as const;
 
 const boardStyle = css({
   display: "grid",
@@ -371,6 +512,84 @@ const facePoppingStyle = css({
 });
 
 const glyphStyle = css({ display: "block", width: "100%", height: "100%" });
+
+/**
+ * A spark: out along its own direction, shrinking, and gone.
+ *
+ * `transform-box: fill-box` is what makes `scale` shrink the spark about itself; an SVG element's
+ * transform origin is otherwise the corner of the user space, which would fling it across the
+ * board instead.
+ */
+const sparkStyle = css({
+  transformBox: "fill-box",
+  transformOrigin: "center",
+  "@keyframes tetra-spark": {
+    "0%": { transform: "translate(0, 0) scale(0.5)", opacity: 1 },
+    "12%": { transform: "translate(0, 0) scale(1.15)", opacity: 1 },
+    "60%": { opacity: 1 },
+    "100%": {
+      transform: "translate(var(--tetra-dx), var(--tetra-dy)) scale(0.12)",
+      opacity: 0,
+    },
+  },
+  animation: "tetra-spark 720ms cubic-bezier(.12,.7,.25,1) forwards",
+  "@media (prefers-reduced-motion: reduce)": { animation: "none", opacity: 0 },
+});
+
+/** The ring the cell leaves behind: out fast, thin, and gone before the sparks are. */
+const shockStyle = css({
+  transformBox: "fill-box",
+  transformOrigin: "center",
+  "@keyframes tetra-shock": {
+    "0%": { transform: "scale(0.3)", opacity: 1 },
+    "30%": { opacity: 0.75 },
+    "100%": { transform: "scale(2.6)", opacity: 0 },
+  },
+  animation: "tetra-shock 520ms cubic-bezier(.1,.75,.3,1) forwards",
+  "@media (prefers-reduced-motion: reduce)": { animation: "none", opacity: 0 },
+});
+
+/**
+ * The light the whole board takes on a clear.
+ *
+ * Keyed on the burst, so a second clear restarts it rather than being swallowed by the first.
+ * Short and weak: it is there to make the board part of the event rather than to be looked at.
+ */
+const flashStyles = {
+  medium: css({
+    position: "absolute",
+    inset: "0",
+    borderRadius: "14px",
+    pointerEvents: "none",
+    background: ink.text,
+    "@keyframes tetra-flash-medium": {
+      "0%": { opacity: 0.1 },
+      "100%": { opacity: 0 },
+    },
+    animation: "tetra-flash-medium 200ms ease-out forwards",
+    "@media (prefers-reduced-motion: reduce)": {
+      animation: "none",
+      opacity: 0,
+    },
+  }),
+  large: css({
+    position: "absolute",
+    inset: "0",
+    borderRadius: "14px",
+    pointerEvents: "none",
+    background: ink.text,
+    "@keyframes tetra-flash-large": {
+      "0%": { opacity: 0.22 },
+      "18%": { opacity: 0.16 },
+      "100%": { opacity: 0 },
+    },
+    animation: "tetra-flash-large 320ms ease-out forwards",
+    "@media (prefers-reduced-motion: reduce)": {
+      animation: "none",
+      opacity: 0,
+    },
+  }),
+} as const;
 
 /** Over the board, and out of the way of the pointer handlers underneath. */
 const lineStyle = css({
