@@ -95,10 +95,8 @@ export const TetraControls = clientEntry(
               <div mix={cardStyle}>
                 <h2 mix={cardTitleStyle}>終了</h2>
                 <p mix={bigStyle}>{game.score}</p>
-                <p mix={cardTextStyle}>
-                  {game.seedLabel}消去 {game.clears} 回　最長 {game.longest}
-                  ミス {game.misses} 回
-                </p>
+                {/* One string: an ideographic space against a JSX line break is trimmed away. */}
+                <p mix={cardTextStyle}>{summary()}</p>
                 <button
                   type="button"
                   mix={[primaryStyle, on("click", () => game.replay())]}
@@ -113,6 +111,16 @@ export const TetraControls = clientEntry(
     );
   },
 );
+
+/** How the round went, on one line. */
+function summary(): string {
+  return [
+    game.seedLabel,
+    `消去 ${game.clears} 回`,
+    `最長 ${game.longest}`,
+    `ミス ${game.misses} 回`,
+  ].join("　");
+}
 
 // --- styles -----------------------------------------------------------------
 
