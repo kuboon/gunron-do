@@ -13,9 +13,6 @@
 /** Japan is UTC+9, all year. */
 const TOKYO_OFFSET_MS = 9 * 60 * 60 * 1000;
 
-/** How far back a random board reaches. Long enough that two of them rarely collide. */
-const RANDOM_SPAN_DAYS = 1200;
-
 /** What the URL has to say for itself. */
 export interface Session {
   /** The board, as `YYYY-MM-DD`. */
@@ -40,13 +37,6 @@ export function isDate(text: string): boolean {
   const parsed = new Date(`${text}T00:00:00Z`);
   return !Number.isNaN(parsed.getTime()) &&
     parsed.toISOString().slice(0, 10) === text;
-}
-
-/** A day from the last few years, for a board nobody has been served today. */
-export function randomDate(): string {
-  const days = Math.floor(Math.random() * RANDOM_SPAN_DAYS) + 1;
-  const when = Date.now() + TOKYO_OFFSET_MS - days * 24 * 60 * 60 * 1000;
-  return new Date(when).toISOString().slice(0, 10);
 }
 
 /**

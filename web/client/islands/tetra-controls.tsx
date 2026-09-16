@@ -26,7 +26,6 @@ import {
 } from "../games/tetra-do/record.ts";
 import {
   boardUrl,
-  randomDate,
   readSession,
   type Session,
   shareUrl,
@@ -108,9 +107,6 @@ export const TetraControls = clientEntry(
           >
             なぞり中に立体を回す
           </button>
-          <a mix={linkButtonStyle} href={boardUrl(randomDate())}>
-            別の日の盤面
-          </a>
           <a mix={linkButtonStyle} href={boardUrl(todayInTokyo())}>
             今日の盤面
           </a>
