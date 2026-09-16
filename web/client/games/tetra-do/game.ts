@@ -30,6 +30,7 @@ import {
   reducedLength,
   slerp,
 } from "./rotation.ts";
+import type { Move } from "./record.ts";
 import { sound } from "./sound.ts";
 
 /** The board is square, and small enough that every cell is in reach of a thumb. */
@@ -180,14 +181,6 @@ function hash(text: string): number {
   return h >>> 0;
 }
 
-/** Today, as the string that names today's board. */
-function today(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
-}
-
 export class TetraDo {
   #cells: Cell[] = [];
   #nextId = 0;
@@ -208,8 +201,13 @@ export class TetraDo {
   #effectId = 0;
   #hitStop = 0;
   #spokenSecond = 0;
-  #daily = true;
-  #seedLabel = "";
+  /** The board's day, as it is written in the URL. */
+  #date = "";
+  /** What the player did this round, for the link at the end of it. */
+  #moves: Move[] = [];
+  /** What a recorded round has left to do, while one is being played back. */
+  #pending: Move[] = [];
+  #replaying = false;
 
   /** Whether the solid turns under your finger, or waits and checks your answer afterwards. */
   #live = true;
@@ -285,8 +283,17 @@ export class TetraDo {
   get live(): boolean {
     return this.#live;
   }
-  get seedLabel(): string {
-    return this.#seedLabel;
+  /** The board's day. Also the seed, and half of what a round's link is made of. */
+  get date(): string {
+    return this.#date;
+  }
+  /** Whether what is on screen is a recording rather than a game. */
+  get replaying(): boolean {
+    return this.#replaying;
+  }
+  /** Everything the player did this round, in order. */
+  get moves(): readonly Move[] {
+    return this.#moves;
   }
   /**
    * The cells on their way out, by id.
@@ -317,34 +324,74 @@ export class TetraDo {
 
   // --- starting and stopping -------------------------------------------------
 
-  /** Starts the board everyone gets today. */
-  startDaily(): void {
-    const date = today();
-    this.#start(`daily-${date}`, `${date} の盤面`, true);
+  /**
+   * Starts the board a day names.
+   *
+   * The date is the seed, so the same day is the same board for everyone — and, with the moves,
+   * half of what a round's link is made of. Nothing here knows where the date came from; the URL
+   * is read in `session.ts`, and this takes what it found.
+   *
+   * @param date The board's day, as `YYYY-MM-DD`
+   */
+  start(date: string): void {
+    this.#begin(date);
+    this.#emit();
   }
 
-  /** Starts a board nobody has seen. */
-  startRandom(): void {
-    const seed = Math.random().toString(36).slice(2, 8);
-    this.#start(`random-${seed}`, `ランダム ${seed}`, false);
+  /**
+   * Plays a recorded round back on its own board.
+   *
+   * The moves are delivered by the clock in {@link onFrame} rather than by a timer of their own,
+   * so they land where they landed: the recording's times are on the game's clock, and so is the
+   * playback. A frame that arrives late moves them all together or not at all.
+   *
+   * @param date The board the round was played on
+   * @param moves What the player did, in order
+   */
+  startReplay(date: string, moves: readonly Move[]): void {
+    this.#begin(date);
+    this.#replaying = true;
+    this.#pending = [...moves];
+    this.#emit();
   }
 
-  /** Plays again, in the same spirit as the round that just ended. */
-  replay(): void {
-    if (this.#daily) this.startDaily();
-    else this.startRandom();
+  /** The same board again, from the top. */
+  restart(): void {
+    this.start(this.#date);
+  }
+
+  /**
+   * Lays out the board a day names, without starting the clock.
+   *
+   * What the "how to play" card sits on top of, so the board behind it is the one the player is
+   * about to be given rather than a placeholder that changes the moment they press the button.
+   *
+   * @param date The board's day
+   */
+  preview(date: string): void {
+    this.#begin(date);
+    this.#phase = "ready";
+    this.#emit();
   }
 
   /** Turns the solid under the finger, or saves it for the answer. */
   setLive(live: boolean): void {
+    if (this.#replaying) return;
+    this.#write("live", live ? 1 : 0);
+    this.#setLive(live);
+  }
+
+  #setLive(live: boolean): void {
     this.#live = live;
     this.#emit();
   }
 
-  #start(seed: string, label: string, daily: boolean): void {
-    this.#random = mulberry32(hash(seed));
-    this.#seedLabel = label;
-    this.#daily = daily;
+  #begin(date: string): void {
+    this.#random = mulberry32(hash(`daily-${date}`));
+    this.#date = date;
+    this.#moves = [];
+    this.#pending = [];
+    this.#replaying = false;
     this.#cells = [];
     this.#fill();
     this.#path = [];
@@ -361,7 +408,45 @@ export class TetraDo {
     this.#hitStop = 0;
     this.#spokenSecond = 0;
     this.#resetSolid();
-    this.#emit();
+
+    // The setting the round is played under is part of the round: a recording that did not carry
+    // it would play back through whichever way the *viewer* last left the button.
+    this.#write("live", this.#live ? 1 : 0);
+  }
+
+  // --- the record ------------------------------------------------------------
+
+  /**
+   * Writes down what just happened, stamped on the game's own clock.
+   *
+   * Nothing is written while a recording is playing: the moves are already on the page, and a
+   * replay that recorded itself would hand back a copy of its own input.
+   */
+  #write(kind: Move["kind"], value: number): void {
+    if (this.#replaying) return;
+    this.#moves.push({ at: ROUND_MS - this.#timeLeft, kind, value });
+  }
+
+  /** Delivers everything a recording had due by now. */
+  #playback(): void {
+    const elapsed = ROUND_MS - this.#timeLeft;
+    while (this.#pending.length > 0 && this.#pending[0].at <= elapsed) {
+      const move = this.#pending.shift()!;
+      switch (move.kind) {
+        case "begin":
+          this.#beginTrace(move.value);
+          break;
+        case "extend":
+          this.#extendTrace(move.value);
+          break;
+        case "end":
+          this.#endTrace();
+          break;
+        case "live":
+          this.#setLive(move.value === 1);
+          break;
+      }
+    }
   }
 
   #fill(): void {
@@ -376,6 +461,12 @@ export class TetraDo {
 
   /** Starts a trace at a cell. */
   beginTrace(index: number): void {
+    if (this.#replaying) return;
+    this.#write("begin", index);
+    this.#beginTrace(index);
+  }
+
+  #beginTrace(index: number): void {
     if (this.#phase !== "playing" || this.#leaving(index)) return;
     this.#path = [index];
     sound.step(0);
@@ -394,6 +485,12 @@ export class TetraDo {
    * way through rather than having to plan.
    */
   extendTrace(index: number): void {
+    if (this.#replaying) return;
+    this.#write("extend", index);
+    this.#extendTrace(index);
+  }
+
+  #extendTrace(index: number): void {
     if (this.#phase !== "playing" || this.#path.length === 0) return;
     const last = this.#path[this.#path.length - 1];
     if (index === last) return;
@@ -418,6 +515,12 @@ export class TetraDo {
 
   /** Lifts the finger, and judges what was traced. */
   endTrace(): void {
+    if (this.#replaying) return;
+    this.#write("end", 0);
+    this.#endTrace();
+  }
+
+  #endTrace(): void {
     if (this.#phase !== "playing") return;
     const word = this.word;
     if (word.length === 0) return;
@@ -653,6 +756,7 @@ export class TetraDo {
     } else if (this.#phase === "playing") {
       this.#timeLeft -= dt;
       this.#countdown();
+      if (this.#replaying) this.#playback();
       if (this.#timeLeft <= 0) {
         this.#timeLeft = 0;
         this.#phase = "over";
