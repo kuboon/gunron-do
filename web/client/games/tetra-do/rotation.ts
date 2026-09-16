@@ -215,22 +215,46 @@ export function compose(ops: readonly Op[]): Quat {
 }
 
 /**
- * How long a trace is once neighbouring moves that undo each other are struck out.
+ * Which moves in a trace are struck out, and how many are left.
  *
  * `a a⁻¹` is the identity whatever else is around it, so a trace padded with pairs is the same
  * rotation as the trace without them — and scoring the padding would make the longest trace the
- * one that says the least. This is the free reduction of the word, done with a stack: each move
- * either cancels the one on top or joins it.
+ * one that says the least. This is the free reduction of the word, done with a stack of positions:
+ * each move either cancels the one on top or joins it, and the ones that cancelled are the ones
+ * the board draws dim.
+ *
+ * Nested pairs go too: in `a b b⁻¹ a⁻¹` the inner pair cancels first, which leaves the outer two
+ * adjacent, so all four are struck out.
+ *
+ * @param ops The moves, in trace order
+ * @returns One flag per move, and how many survived
+ */
+export function freeReduction(
+  ops: readonly Op[],
+): { cancelled: boolean[]; length: number } {
+  const cancelled = ops.map(() => false);
+  const stack: number[] = [];
+
+  for (let i = 0; i < ops.length; i++) {
+    const top = stack[stack.length - 1];
+    if (top !== undefined && ops[top] === opInverse(ops[i])) {
+      cancelled[top] = true;
+      cancelled[i] = true;
+      stack.pop();
+    } else {
+      stack.push(i);
+    }
+  }
+
+  return { cancelled, length: stack.length };
+}
+
+/**
+ * How long a trace is once the moves that undo each other are struck out.
  *
  * @param ops The moves, in trace order
  * @returns The length of the reduced word
  */
 export function reducedLength(ops: readonly Op[]): number {
-  const stack: Op[] = [];
-  for (const op of ops) {
-    const top = stack[stack.length - 1];
-    if (top !== undefined && top === opInverse(op)) stack.pop();
-    else stack.push(op);
-  }
-  return stack.length;
+  return freeReduction(ops).length;
 }

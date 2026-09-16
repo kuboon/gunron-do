@@ -14,6 +14,12 @@
  * the grid a different length for as long as the animation ran, and every cell after the gap
  * would slide into it and back out again.
  *
+ * The line the finger leaves is the one place the scoring is visible while it can still be
+ * changed. A move that cancels its neighbour is worth nothing, so the segments around it go thin,
+ * dim and dashed, and the cells under them lose their highlight — a trace that is nothing but
+ * cancellation looks like nothing before the finger comes up, which is the moment it is still
+ * worth knowing.
+ *
  * What it reads is the game; what it writes is three calls on it. No rule is decided here.
  */
 
@@ -23,11 +29,11 @@ import { animateEntrance, animateLayout } from "@remix-run/ui/animation";
 import { game, HEIGHT, WIDTH } from "../games/tetra-do/game.ts";
 import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
 import {
+  freeReduction,
   type Op,
   opBase,
   opDirection,
   opLabel,
-  reducedLength,
 } from "../games/tetra-do/rotation.ts";
 
 /**
@@ -129,8 +135,9 @@ export const TetraBoard = clientEntry(
     return () => {
       const path = game.path;
       const popping = game.popping;
-      const word = game.word;
-      const reduced = reducedLength(word);
+      // Which of the traced cells cancel each other out. They are what the line goes dim for, so
+      // a trace that is all cancellation looks like what it is before the finger comes up.
+      const { cancelled } = freeReduction(game.word);
 
       return (
         <div mix={game.shaking ? [wrapStyle, shakeStyle] : [wrapStyle]}>
@@ -179,7 +186,13 @@ export const TetraBoard = clientEntry(
                   animateLayout(),
                 ]}
               >
-                <div mix={faceMix(popping.has(cell.id), path.includes(index))}>
+                <div
+                  mix={faceMix(
+                    popping.has(cell.id),
+                    path.indexOf(index),
+                    cancelled,
+                  )}
+                >
                   {glyph(cell.op)}
                 </div>
               </div>
@@ -193,50 +206,31 @@ export const TetraBoard = clientEntry(
                 viewBox={`0 0 ${width} ${height}`}
                 aria-hidden="true"
               >
-                <polyline
-                  points={path
-                    .map((index) => center(index).join(","))
-                    .join(" ")}
-                  fill="none"
-                  stroke={ink.text}
-                  stroke-opacity=".55"
-                  stroke-width={Math.max(4, cellSize() * 0.13)}
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
+                {path.slice(1).map((to, step) => {
+                  const from = center(path[step]);
+                  const dead = cancelled[step] || cancelled[step + 1];
+                  const [x2, y2] = center(to);
+                  return (
+                    <line
+                      key={`${path[step]}-${to}`}
+                      x1={from[0]}
+                      y1={from[1]}
+                      x2={x2}
+                      y2={y2}
+                      stroke={dead ? ink.muted : ink.text}
+                      stroke-opacity={dead ? 0.4 : 0.7}
+                      stroke-width={Math.max(4, cellSize() * 0.13) *
+                        (dead ? 0.6 : 1)}
+                      stroke-dasharray={dead
+                        ? `${cellSize() * 0.09} ${cellSize() * 0.09}`
+                        : undefined}
+                      stroke-linecap="round"
+                    />
+                  );
+                })}
               </svg>
             )
             : null}
-
-          <p mix={wordStyle} aria-live="polite">
-            {word.map((op, position) => (
-              <span
-                key={`${position}-${op}`}
-                style={{ color: OP_COLORS[opBase(op)] }}
-              >
-                {opLabel(op)}
-              </span>
-            ))}
-            {word.length > 0
-              ? (
-                <small mix={lengthStyle}>
-                  長さ {word.length}
-                  {reduced !== word.length ? `（打ち消し後 ${reduced}）` : ""}
-                </small>
-              )
-              : null}
-          </p>
-
-          <p
-            mix={game.message.tone === "good"
-              ? [messageStyle, goodStyle]
-              : game.message.tone === "bad"
-              ? [messageStyle, badStyle]
-              : [messageStyle]}
-            aria-live="polite"
-          >
-            {game.message.text}
-          </p>
         </div>
       );
     };
@@ -293,10 +287,27 @@ function glyph(op: Op) {
   );
 }
 
-/** A cell's face: on its way out, being traced, or neither. */
-function faceMix(leaving: boolean, traced: boolean) {
+/**
+ * A cell's face: on its way out, traced, traced-but-cancelled, or none of those.
+ *
+ * The cancelled one matters as much as the traced one. A trace that only undoes itself scores
+ * nothing, and the board is where that has to be visible — a player following the letters would
+ * have to reduce the word in their head to see it coming.
+ *
+ * @param leaving Whether the cell is mid-clear
+ * @param step Where the cell sits in the trace, or `-1` when it is not in it
+ * @param cancelled One flag per step of the trace
+ */
+function faceMix(
+  leaving: boolean,
+  step: number,
+  cancelled: readonly boolean[],
+) {
   if (leaving) return [faceStyle, facePoppingStyle];
-  return traced ? [faceStyle, faceTracedStyle] : [faceStyle];
+  if (step < 0) return [faceStyle];
+  return cancelled[step]
+    ? [faceStyle, faceCancelledStyle]
+    : [faceStyle, faceTracedStyle];
 }
 
 // --- styles -----------------------------------------------------------------
@@ -346,6 +357,13 @@ const faceTracedStyle = css({
   background: surface.cellActive,
 });
 
+/** Traced, but undone by a neighbour: in the trace and worth nothing. */
+const faceCancelledStyle = css({
+  transform: "scale(0.9)",
+  background: surface.board,
+  opacity: 0.55,
+});
+
 /** Cleared, and shrinking away in the slot it still holds. */
 const facePoppingStyle = css({
   transform: "scale(0.2)",
@@ -360,31 +378,3 @@ const lineStyle = css({
   inset: "0",
   pointerEvents: "none",
 });
-
-const wordStyle = css({
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  gap: "0.1rem 0.4rem",
-  minHeight: "1.6em",
-  margin: 0,
-  fontSize: "1.05rem",
-  fontWeight: 700,
-});
-
-const lengthStyle = css({
-  color: ink.muted,
-  fontSize: "0.8rem",
-  fontWeight: 400,
-  marginLeft: "0.3rem",
-});
-
-const messageStyle = css({
-  minHeight: "1.5em",
-  margin: 0,
-  fontSize: "0.95rem",
-  color: ink.muted,
-});
-
-const goodStyle = css({ color: ink.good });
-const badStyle = css({ color: ink.bad });
