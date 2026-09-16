@@ -25,7 +25,6 @@ import {
   type Op,
   OP_ROTATIONS,
   opBase,
-  opDirection,
   opInverse,
   type Quat,
   reducedLength,
@@ -48,10 +47,21 @@ export const LOW_TIME_MS = 15_000;
 /** Where the round is in its life, which is also which overlay is up. */
 export type Phase = "ready" | "playing" | "over";
 
-/** A line under the board: what just happened, and how it went. */
-export interface Message {
+/**
+ * A number that just moved, for the HUD to make a fuss about.
+ *
+ * The board used to say what happened in a line of prose under it. It says it with the numbers
+ * now: the score and the longest trace jump when they change, and the clock does when a miss takes
+ * five seconds off it. One of these is what makes that happen — the text to float, and when, so
+ * the HUD can work out how far along the animation is on the frame it is drawing.
+ */
+export interface Pop {
+  /** New with every pop, so the HUD can tell a second one from the first. */
+  id: number;
+  /** What it says: `+25`, `7`, `−5秒`. */
   text: string;
-  tone: "" | "good" | "bad";
+  /** When it happened, on the clock the frame loop runs on. */
+  at: number;
 }
 
 /**
@@ -138,8 +148,11 @@ export class TetraDo {
   #misses = 0;
   #timeLeft = ROUND_MS;
   #phase: Phase = "ready";
-  #message: Message = { text: "", tone: "" };
   #shaking = false;
+  #scorePop: Pop | null = null;
+  #longestPop: Pop | null = null;
+  #timePop: Pop | null = null;
+  #popId = 0;
   #daily = true;
   #seedLabel = "";
 
@@ -198,8 +211,17 @@ export class TetraDo {
   get phase(): Phase {
     return this.#phase;
   }
-  get message(): Message {
-    return this.#message;
+  /** The score's last jump, or `null` if nothing has scored yet this round. */
+  get scorePop(): Pop | null {
+    return this.#scorePop;
+  }
+  /** The last time the longest trace was beaten. */
+  get longestPop(): Pop | null {
+    return this.#longestPop;
+  }
+  /** The last time a miss took five seconds off the clock. */
+  get timePop(): Pop | null {
+    return this.#timePop;
   }
   /** True for the moment after a miss, which is the board shaking its head. */
   get shaking(): boolean {
@@ -277,7 +299,9 @@ export class TetraDo {
     this.#misses = 0;
     this.#timeLeft = ROUND_MS;
     this.#phase = "playing";
-    this.#message = { text: "元の向きに戻る経路をなぞる", tone: "" };
+    this.#scorePop = null;
+    this.#longestPop = null;
+    this.#timePop = null;
     this.#resetSolid();
     this.#emit();
   }
@@ -354,7 +378,8 @@ export class TetraDo {
     if (isIdentity(compose(word))) {
       if (reduced >= MIN_REDUCED_LENGTH) this.#clear(reduced);
       else {
-        this.#message = { text: "打ち消し合うだけの経路は消えない", tone: "" };
+        // Nothing but cancellations: the solid did come home, so this is not a miss and costs
+        // nothing. The dim line the player was drawing already said it would not clear.
         this.#path = [];
         this.#rightSolid();
         this.#emit();
@@ -362,7 +387,7 @@ export class TetraDo {
       return;
     }
 
-    this.#miss(word);
+    this.#miss();
   }
 
   /** Whether a cell is mid-clear, and so not part of the board any more. */
@@ -372,13 +397,15 @@ export class TetraDo {
 
   #clear(reduced: number): void {
     const gain = reduced * reduced;
+    const record = reduced > this.#longest;
+
     this.#score += gain;
     this.#clears += 1;
     this.#longest = Math.max(this.#longest, reduced);
-    this.#message = {
-      text: `+${gain}　長さ ${reduced} で元の向き`,
-      tone: "good",
-    };
+    this.#scorePop = this.#pop(`+${gain}`);
+    // An arrow rather than the bare number: beside a number that already says `6`, a floating `6`
+    // reads as a second score rather than as the one that just moved.
+    if (record) this.#longestPop = this.#pop(`↑${reduced}`);
     this.#queue.push({ kind: "flash" });
 
     const removed = new Set(this.#path);
@@ -412,26 +439,20 @@ export class TetraDo {
     }
   }
 
-  #miss(word: readonly Op[]): void {
+  #miss(): void {
     this.#misses += 1;
     this.#timeLeft -= MISS_PENALTY_MS;
-
-    // The signed letter count, mod 3, survives every rearrangement of a word — so when it is not
-    // zero the trace could not have come home however it was traced, and saying so is a better
-    // hint than "wrong".
-    let twist = 0;
-    for (const op of word) twist += opDirection(op);
-    this.#message = {
-      text: twist % 3 !== 0
-        ? "時計回りと反時計回りの数の差が3の倍数でない　−5秒"
-        : "元の向きに戻っていない　−5秒",
-      tone: "bad",
-    };
+    this.#timePop = this.#pop("−5秒");
 
     this.#path = [];
     this.#rightSolid();
     this.#shake();
     this.#emit();
+  }
+
+  /** A number's next jump, stamped so the HUD can age it. */
+  #pop(text: string): Pop {
+    return { id: ++this.#popId, text, at: performance.now() };
   }
 
   /**
