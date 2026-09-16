@@ -2,9 +2,9 @@
  * Score, longest trace, and the time running out — and what it looks like when one of them moves.
  *
  * The board used to explain itself in a line of prose underneath it. It does not any more, so the
- * numbers have to carry it: a clear throws `+25` up off the score, beating the longest trace
- * throws the new length off that one, and a miss throws `−5秒` off the clock. What each of them
- * does is say *where* it happened, which a line of text under the board could not.
+ * numbers carry it: a clear throws `+25` off the score, and beating the longest trace throws the
+ * new length off that one. What each of them does is say *where* it happened, which a line of
+ * text under the board could not.
  *
  * The animation is arithmetic rather than a keyframe: this island already re-renders on the game's
  * frame clock, so the age of a pop is a number it has on the frame it is drawing, and the scale
@@ -98,9 +98,7 @@ export const TetraHud = clientEntry(
             ? (
               <div
                 mix={vignetteStyle}
-                style={{
-                  opacity: 0.25 + 0.45 * depth + 0.3 * beat,
-                }}
+                style={{ opacity: 0.16 + 0.34 * depth + 0.22 * beat }}
               />
             )
             : null}
@@ -255,7 +253,7 @@ const countdownStyle = css({
   position: "absolute",
   right: "0",
   top: "calc(100% + 0.1rem)",
-  fontSize: "1.1rem",
+  fontSize: "1.45rem",
   fontWeight: 700,
   fontVariantNumeric: "tabular-nums",
   color: ink.bad,
@@ -275,7 +273,10 @@ const vignetteStyle = css({
   inset: "0",
   zIndex: 5,
   pointerEvents: "none",
-  boxShadow: `inset 0 0 6rem 0.75rem ${ink.bad}`,
+  // A gradient with a clear middle rather than a shadow across the whole viewport: the pressure
+  // has to be felt at the edges of the eye while the board stays exactly as readable as it was.
+  background:
+    `radial-gradient(ellipse at center, transparent 42%, ${ink.bad} 128%)`,
 });
 
 const barStyle = css({

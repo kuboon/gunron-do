@@ -52,9 +52,9 @@ export type Phase = "ready" | "playing" | "over";
  * A number that just moved, for the HUD to make a fuss about.
  *
  * The board used to say what happened in a line of prose under it. It says it with the numbers
- * now: the score and the longest trace jump when they change, and the clock does when a miss takes
- * five seconds off it. One of these is what makes that happen — the text to float, and when, so
- * the HUD can work out how far along the animation is on the frame it is drawing.
+ * now: the score and the longest trace jump when they change. One of these is what makes that
+ * happen — the text to float, and when, so the HUD can work out how far along the animation is on
+ * the frame it is drawing.
  */
 /** One cleared cell, as the sparks coming off it need it. */
 export interface BurstCell {
@@ -95,7 +95,7 @@ export interface Shake {
 export interface Pop {
   /** New with every pop, so the HUD can tell a second one from the first. */
   id: number;
-  /** What it says: `+25`, `7`, `−5秒`. */
+  /** What it says: `+25`, or `↑7`. */
   text: string;
   /** When it happened, on the clock the frame loop runs on. */
   at: number;
