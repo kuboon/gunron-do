@@ -25,15 +25,16 @@
  * this page — its title and its description — but where the PNG ended up, and whether there is an
  * origin to make its URL absolute with, are things only the server knows.
  *
- * The one stylesheet it does link is `static/app.css`: the site's tokens, its document-level defaults,
- * and the `@layer base, rmx, app` statement the whole cascade hangs off. Its position in the head
- * matters — layers rank by where they are first named, and Remix appends its collected styles just
- * before `</head>`, so the link has to come first.
+ * The one stylesheet it does link is `static/app.css`: the site's tokens, its document-level
+ * defaults, and the `@layer base, rmx, app` statement the whole cascade hangs off. Its position in
+ * the head matters — layers rank by where they are first named, and Remix appends its collected
+ * styles just before `</head>`, so the link has to come first.
  */
 
 import { css, type RemixNode } from "@remix-run/ui";
 
 import { base } from "./base.ts";
+import { games } from "./games.ts";
 import { routes } from "./routes.ts";
 import { color, contentWidth } from "./tokens.ts";
 
@@ -68,11 +69,26 @@ export interface LayoutProps {
    * The shell has to be handed it rather than finding out for itself: entries are resolved while
    * the tree renders, and by then the `<script>` that boots them has already been written.
    *
-   * Required, and `null` for a page with no islands — an article ships no JavaScript at all. It is
-   * not optional because forgetting it is exactly the bug that shipped a showcase whose eighteen
-   * islands never hydrated: a page rendered fine, and nothing on it worked.
+   * Required, and `null` for a page with no islands — a rules page ships no JavaScript at all.
    */
   script: ClientRuntime | null;
+  /**
+   * Whether the page sits in the site's shell, or is given the screen.
+   *
+   * A game is the second kind. Its screen is the game — a header band and a footer above and below
+   * it would be a smaller board on a phone for no gain — so `bare` drops both and hands the page
+   * the document. Everything else on the site is a document and takes the default.
+   */
+  chrome?: "site" | "bare";
+  /**
+   * What the document is painted, for a `bare` page.
+   *
+   * On the `<body>` rather than on the page's own box, because an overscroll on a phone drags the
+   * page away from the edge of the screen and shows whatever is behind it — and a game on a dark
+   * board flashing white at the top is worse than the bounce it came from. A page with the site's
+   * shell has no use for it: the shell's own background is the right one.
+   */
+  background?: string;
   children: RemixNode;
 }
 
@@ -90,8 +106,10 @@ export interface ClientRuntime {
  * @returns The response to serve for this page
  */
 export function Layout(props: LayoutProps): RemixNode {
+  const bare = props.chrome === "bare";
+
   return (
-    <html lang="en">
+    <html lang="ja">
       <head>
         <meta charset="utf-8" />
         <meta
@@ -121,27 +139,35 @@ export function Layout(props: LayoutProps): RemixNode {
           <link key={href} rel="modulepreload" href={href} />
         ))}
       </head>
-      <body>
-        <header mix={[bandStyle, headerStyle]}>
-          <a mix={brandStyle} href={routes.home.href()}>remix-ssg</a>
-          <nav mix={navStyle}>
-            <a href={routes.home.href()}>Home</a>
-            <a href={routes.about.href()}>About</a>
-            <a href={routes.blog.index.href()}>Blog</a>
-            {/* Fullscreen demo: delete this link when you delete the demo — see README. */}
-            <a href={routes.fullscreen.href()}>Fullscreen</a>
-            {/* Showcase: delete this link when you delete the showcase — see README. */}
-            <a href={routes.showcase.href()}>UI showcase</a>
-          </nav>
-        </header>
-        <main mix={[bandStyle, mainStyle]}>{props.children}</main>
-        <footer mix={[bandStyle, footerStyle]}>
-          <p>
-            Built with{" "}
-            <a href="https://jsr.io/@remix-kbn/ssg">@remix-kbn/ssg</a> and{" "}
-            <a href="https://remix.run">Remix v3</a>.
-          </p>
-        </footer>
+      <body
+        style={bare
+          ? { background: props.background, overscrollBehavior: "none" }
+          : undefined}
+      >
+        {bare ? null : (
+          <header mix={[bandStyle, headerStyle]}>
+            <a mix={brandStyle} href={routes.home.href()}>gunron-do</a>
+            <nav mix={navStyle}>
+              {games.map((game) => (
+                <a key={game.slug} href={game.href}>{game.title}</a>
+              ))}
+            </nav>
+          </header>
+        )}
+
+        {bare
+          ? props.children
+          : <main mix={[bandStyle, mainStyle]}>{props.children}</main>}
+
+        {bare ? null : (
+          <footer mix={[bandStyle, footerStyle]}>
+            <p>
+              群論で遊ぶ。ソースは{" "}
+              <a href="https://github.com/kuboon/gunron-do">GitHub</a>。
+            </p>
+          </footer>
+        )}
+
         {props.script
           ? <script type="module" src={props.script.src}></script>
           : null}

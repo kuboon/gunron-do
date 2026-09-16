@@ -1,65 +1,38 @@
+/**
+ * The front door: what this place is, and every game in it.
+ *
+ * The list is `games.ts` rather than markup, because the shell's nav and the rules routes read the
+ * same list — a game missing from one of the three is the bug this avoids having.
+ */
+
 import { css, type RemixNode } from "@remix-run/ui";
 
-import { routes } from "../routes.ts";
+import { games } from "../games.ts";
 import { buttonStyle, cardStyle } from "../theme.ts";
 import { color } from "../tokens.ts";
-import { Counter } from "../islands/counter.tsx";
-import { Total } from "../islands/total.tsx";
 
-export const title = "remix-ssg — a static site starter";
+export const title = "gunron-do — 群論で遊ぶ";
 export const description =
-  "A Remix v3 static-site-generation starter for GitHub Pages.";
-
-/** This page places two client entries, so the shell boots the runtime for it. */
-export const hydrate = true;
+  "群を題材にした小さなゲームを置いていく場所。いまのところ「テトラ道」が1つ。";
 
 export default function Home(): RemixNode {
   return (
     <>
-      <h1>A static site, rendered by your own handler</h1>
+      <h1>gunron-do</h1>
       <p mix={leadStyle}>
-        This starter serves <a href="https://remix.run">Remix v3</a>{" "}
-        pages from a handler you write in <code>router.ts</code>, and{" "}
-        <a href="https://jsr.io/@remix-kbn/ssg">@remix-kbn/ssg</a>{" "}
-        crawls that same handler into static HTML for GitHub Pages.
+        群は、覚えるものというより手つきです。ここには、その手つきが身につく小さなゲームを置いていきます。
       </p>
-      <ul mix={featureListStyle}>
-        <li>Server-rendered pages — zero client JavaScript by default.</li>
-        <li>
-          Content authored in Markdown, rendered with{" "}
-          <a href="https://jsr.io/@kuboon/md">@kuboon/md</a>{" "}
-          by a controller this site owns.
-        </li>
-        <li>
-          Works at the domain root, a repo sub-path, or a PR preview URL.
-        </li>
-        <li>Opt into interactivity per page with hydrated islands.</li>
-      </ul>
-      <section mix={cardStyle}>
-        <h2>Two islands, one shared module</h2>
-        <p>
-          Both controls below are server-rendered like every other page, then
-          hydrated in the browser — view source and you'll find them already in
-          the initial HTML.
-        </p>
-        <p>
-          They are <em>separate browser entrypoints</em>{" "}
-          that never talk to each other. Each one imports the same click store,
-          and the running total keeps up because the bundler emitted that store
-          once, into a chunk they share. Compile the two entries independently
-          and each gets a private copy — the total would sit at zero forever.
-        </p>
-        <div mix={demoRowStyle}>
-          <Counter label="Left" start={0} />
-          <Counter label="Right" start={0} />
-          <Total label="Shared total" />
-        </div>
-      </section>
-      <p>
-        <a mix={buttonStyle} href={routes.blog.index.href()}>
-          Read the blog →
-        </a>
-      </p>
+
+      {games.map((game) => (
+        <section key={game.slug} mix={cardStyle}>
+          <h2 mix={gameTitleStyle}>{game.title}</h2>
+          <p>{game.tagline}</p>
+          <p mix={linksStyle}>
+            <a mix={buttonStyle} href={game.href}>あそぶ →</a>
+            <a href={game.rulesHref}>ルールを読む</a>
+          </p>
+        </section>
+      ))}
     </>
   );
 }
@@ -71,14 +44,15 @@ const leadStyle = css({
   color: color.muted,
 });
 
-const featureListStyle = css({
-  paddingLeft: "1.1rem",
-  "& li": { marginBlock: "0.4rem" },
+const gameTitleStyle = css({
+  marginTop: 0,
+  marginBottom: "0.25rem",
+  fontSize: "1.4rem",
 });
 
-const demoRowStyle = css({
+const linksStyle = css({
   display: "flex",
-  flexWrap: "wrap",
   alignItems: "center",
-  gap: "0.75rem",
+  flexWrap: "wrap",
+  gap: "1rem",
 });

@@ -1,9 +1,10 @@
 # web
 
-A static-site starter built with [Remix v3](https://remix.run) — `remix/ui` for
-rendering — and [`@kuboon/remix-ssg`](https://jsr.io/@kuboon/remix-ssg) for
-everything around it. The output is plain HTML that deploys to GitHub Pages:
-zero client-side JavaScript by default, with opt-in interactivity through
+[gunron-do](https://github.com/kuboon/gunron-do), built with
+[Remix v3](https://remix.run) — `remix/ui` for rendering — and
+[`@remix-kbn/ssg`](https://jsr.io/@remix-kbn/ssg) for everything around it. The
+output is plain HTML that deploys to GitHub Pages: the home page and the rules
+pages ship no JavaScript at all, and a game is a page that opts into it through
 hydrated islands.
 
 ## Two halves
@@ -33,7 +34,7 @@ card, drawn by `server/og/`.
 them, and `server/router.ts` maps one to the other — the shape a Remix app has:
 
 ```ts
-router.get(routes.about, aboutAction);
+router.get(routes.tetraDo, tetraDoAction);
 ```
 
 The rest of the site is mapped the same way. A directory is a wildcard route
@@ -63,17 +64,22 @@ fetch behind a frame navigation. It asks the asset server for `getHref` and
 `getPreloads`, which is all it wants from one, so `@kuboon/remix-assets-deno`
 goes straight in.
 
-The Markdown articles are pages like any other. `server/blog/mod.ts` sits in the
-directory the `.md` files are in and answers both blog routes — the listing and
-one article — so `server/router.ts` maps the group in one line:
+A game's rules are a page like any other. `server/games/mod.ts` sits in the
+directory the `.md` files are in, reads the one named after a game and hands
+back its front-matter and its rendered body, so `server/router.ts` answers the
+route in a few lines:
 
 ```ts
-router.map(routes.blog, blogController);
+router.get(routes.rules, async (context) => {
+  const game = findGame(context.params.game);
+  …
+});
 ```
 
-Their URLs are the one thing not enumerated in `client/routes.ts`: they come
-from the files on disk, so `routes.blog.show` states only the _shape_ of an
-article URL, for the listing to link with.
+`client/games.ts` is what says which slugs exist. A slug that is not a game
+never becomes a file name, and the route is `:game` rather than one line per
+game because every game's rules are the same page with a different file behind
+it.
 
 `deno task dev` runs that handler as the dev server. The build drives the very
 same object with `fetch()`, writes each response to disk, and follows the links
@@ -120,25 +126,27 @@ web/
   client/
     deno.json        # lib: dom — no deno.ns, so nothing here can reach for Deno
     routes.ts        # every URL the site answers
+    games.ts         # the games: title, tagline, and the two hrefs of each
     base.ts          # the deploy prefix, computed once
     tokens.ts        # design tokens — colors, fonts, radii, the measure
     theme.ts         # the css() mixins more than one module uses
     layout.tsx       # the HTML document shell
     hydration.ts     # run() — the client runtime, loaded by a page that hydrates
     pages/
-      index.tsx      # home — places two client entries
-      about.tsx
-      showcase.tsx
-      fullscreen.tsx # the mobile-Safari demo — delete me
-      blog/
-        index.tsx    # the listing screen
-        article.tsx  # the article screen
+      index.tsx      # home — the list of games
+      tetra-do.tsx   # テトラ道, full screen: four islands and where they go
+      rules.tsx      # any game's rules, around a rendered Markdown body
+    games/
+      tetra-do/
+        rotation.ts  # the group: six moves, and the arithmetic that composes them
+        game.ts      # the board, the trace, the clock — and the one instance
+        solid.ts     # where every corner of the tetrahedron lands on screen
+        palette.ts   # the game's own colours, painted by CSS and by SVG alike
     islands/
-      counter.tsx    # a hydrated island, and its own browser entrypoint
-      total.tsx      # a second island/entrypoint, sharing state with it
-      store.ts       # the module both islands import — the shared singleton
-      viewport-probe.tsx   # fullscreen demo — delete me
-      fullscreen-demo.tsx  # fullscreen demo — delete me
+      tetra-board.tsx     # the board, and the finger on it
+      tetra-hud.tsx       # score, longest trace, and the clock
+      tetra-solid.tsx     # the tetrahedron, sixty frames a second
+      tetra-controls.tsx  # the buttons, and the cards that book-end a round
     static/
       app.css        # tokens, document defaults, the cascade layer order
       favicon.svg
@@ -146,10 +154,9 @@ web/
     deno.json        # lib: deno.ns — plus the tasks and their permission sets
     router.ts        # the wiring — routes to pages, plus the rest of the site
     assets.ts        # client/ compiled as one graph
-    versions.ts      # the showcase's badges, read off the import map
-    blog/
-      mod.ts         # the articles, and both blog routes
-      *.md           # the articles
+    games/
+      mod.ts         # the rules: the Markdown, and what turns it into a page
+      *.md           # one file per game, named after its slug
     og/
       mod.ts         # which page gets which social card, and the route serving them
       card.ts        # the drawing — Skia, via canvaskit-wasm
@@ -160,42 +167,43 @@ web/
 Two files sit across the line on purpose. `client/base.ts` reads `BASE_URL` off
 `globalThis` rather than through `Deno.env`, because a prefix is a render-time
 value that the browser is never told and `client/` may not name `Deno`; and the
-blog's screens are in `client/pages/blog/` while the module that reads the `.md`
-files beside them is `server/blog/`. Each screen states the shape it needs of an
-article, and the server's own `Article` is a superset of both.
+rules screen is `client/pages/rules.tsx` while the module that reads the `.md`
+files is `server/games/mod.ts`. The screen states the shape it needs — a game,
+and a body already rendered — and the server's own `Rules` is a superset of it.
 
-## The UI showcase (delete me)
+## テトラ道
 
-`client/pages/showcase.tsx` and `client/islands/showcase/` are a port of
-[remix3-ui-showcase](https://github.com/kuboon/remix3-ui-showcase): every
-first-party `@remix-run/ui` component and the animation primitives, each an
-island whose parameters you can change live. It is here to demonstrate the
-framework, and the root README lists it first among the things to delete in a
-repository made from this template.
+The game is four plain modules under `client/games/tetra-do/`: `rotation.ts` is
+the group — six moves, the quaternions they are, and the free reduction that
+decides what a trace is worth — `solid.ts` turns an orientation into the numbers
+an SVG needs, `palette.ts` holds the colours, and `game.ts` is the board, the
+trace, the clock and the one instance the screen reads. None of them touches the
+DOM, which is what lets the rules be checked without a browser.
 
-It is also the largest thing the island pipeline is asked to do here — 18
-entrypoints compiled as one graph, sharing `@remix-run/ui` and the demo chrome
-through code-split chunks rather than 18 copies.
+Four islands draw it. `tetra-board.tsx` takes the trace, `tetra-hud.tsx` the
+score and the clock, `tetra-solid.tsx` the tetrahedron, and
+`tetra-controls.tsx` the buttons and the two cards that book-end a round. The
+split is along what changes when: a turn of the solid runs at sixty frames a
+second, and re-rendering twenty-five cells for each of those frames is what this
+avoids. They agree about the game because they are compiled as one graph, so
+`game.ts` is emitted once into a chunk all four import — the property the next
+section describes, load-bearing here rather than demonstrated.
 
-Helpers the demos share live in `client/islands/showcase/_lib/`. The underscore
-is decoration; what keeps them out of the entrypoints is the depth —
-`server/assets.ts` globs `islands/showcase/*.tsx`, and `_lib/` is a directory
-below that.
+Two details of the board are worth knowing before editing it. The pointer
+handlers are on the board rather than on each cell, because a trace is one
+gesture: once the pointer is captured, which cell a finger is over is worked out
+from where it is, which is also what gives each cell a dead zone at its corners.
+And the cells are keyed by the identity `game.ts` gives them, so a cell that
+falls into the row below is the same key in a new place and a cell dealt into
+the top is a new one — `animateLayout` slides the first, `animateEntrance` drops
+the second, and `animateExit` keeps a cleared cell on screen long enough to see
+it go. Nothing in the island animates anything by hand.
 
-## The mobile Safari demo (delete me)
-
-`client/pages/fullscreen.tsx` answers one question — can CSS hide Safari's URL
-bar and tab bar? — with measurements rather than prose. Its two islands read the
-viewport back live: `viewport-probe.tsx` resolves `100svh`, `100dvh` and
-`100lvh` on hidden probe elements and prints the pixels, and
-`fullscreen-demo.tsx` wires the Fullscreen API to a button. The root README
-lists it among the things to delete in a repository made from this template.
-
-It is also the only page that overrides the shell's viewport meta, which is the
-part worth keeping: `env(safe-area-inset-*)` reads `0px` unless the page opts in
-with `viewport-fit=cover`, so `LayoutProps.viewport` exists for whichever of
-your pages lays out to the edges of a phone screen. Deleting the demo leaves
-that prop in place and unused, which is where the next such page will want it.
+`client/pages/tetra-do.tsx` places the four and sets `chrome: "bare"`, which
+drops the site's header and footer: on a phone the board should be as wide as
+the phone. It is also the one page that overrides the shell's viewport meta,
+because `env(safe-area-inset-*)` reads `0px` until a page asks for
+`viewport-fit=cover`.
 
 ## Styling
 
@@ -258,44 +266,47 @@ out ahead of Remix's own rules — Remix appends its collected styles just befor
 - **`mix` takes an array**, so mixins compose: `mix={[bandStyle, headerStyle]}`
   is what a stylesheet would have said with a grouped selector. When an element
   also has behaviour, the `on(...)` handlers go last.
-- **A page that needs more room than the measure takes it itself.**
-  `client/pages/showcase.tsx` brings its own layout, so its wrapper sets
-  `margin-inline: calc(50% - 50vw)` and widens from the main column to the full
-  viewport — no flag reaches the shell for it, and its background finally spans
-  both edges. `app.css` pairs that with `overflow-x: clip` on `body`, so `50vw`
-  (which counts the scrollbar) cannot drag a horizontal scrollbar behind the
-  vertical one.
+- **A page that wants the screen says so to the shell.** A game exports
+  `chrome = "bare"`, and `client/layout.tsx` leaves out the header, the footer
+  and the main column's measure — `client/pages/tetra-do.tsx` then lays itself
+  out from the viewport, and paints the document through `background` so an
+  overscroll on a phone shows the board's colour rather than the site's.
 - **Nesting reaches markup this site does not write.** `theme.ts`'s `proseStyle`
-  dresses the Markdown articles with `& h2`, `& pre`, `& table` and friends,
-  scoped to the one class on the article wrapper instead of leaking out as bare
-  element selectors.
+  dresses the rules pages with `& h2`, `& pre`, `& table` and friends, scoped to
+  the one class on the article wrapper instead of leaking out as bare element
+  selectors.
 
 `client/static/` holds `app.css` and anything else served verbatim (the favicon,
 images).
 
-## Adding a page
+## Adding a game
 
-Three edits, in the order you would guess:
+A game is a screen someone wrote, so it is named one at a time rather than
+looked up in a table. Five edits:
 
-1. Name its URL in `client/routes.ts` — `contact: get("/contact")`.
-2. Write `client/pages/contact.tsx`, exporting a component as `default` plus a
-   `title` — and `hydrate = true` if it places a client entry. A page that needs
-   a viewport meta of its own exports `viewport` too;
-   `client/pages/fullscreen.tsx` is the one that does, for
-   `viewport-fit=cover`.
-3. Map them in `server/router.ts` —
-   `router.get(routes.contact, pageAction(routes.contact, Contact))`. The route
-   goes in twice because the second one is what files the page's social card.
+1. Add it to `client/games.ts` — its slug, title, tagline and description. The
+   home page lists that, the shell links it, and the rules route reads it.
+2. Name its URL in `client/routes.ts` — `shinGame: get("/shin-game")`.
+3. Write `client/pages/shin-game.tsx`, exporting a component as `default` plus a
+   `title`, and `hydrate = true` if it places an island. A game that wants the
+   screen exports `chrome = "bare"`, the `background` to paint the document, and
+   a `viewport` of its own.
+4. Map it in `server/router.ts` —
+   `router.get(routes.shinGame, pageAction(routes.shinGame, ShinGame))`. The
+   route goes in twice because the second one is what files the page's social
+   card.
+5. Drop `server/games/shin-game.md` beside the others. Its rules are served at
+   `/shin-game/rules` with no further wiring: that route is `:game`, and the
+   slug in step 1 is what makes it a game.
 
-An **article** needs none of that: drop a `.md` file under `server/blog/` and it
-is served at its own name.
+Its logic belongs in `client/games/shin-game/`, and its islands in
+`client/islands/` — `server/assets.ts` globs `islands/*.tsx`, so the file being
+there is what makes it an entrypoint.
 
 The crawl starts at `entryPoints` in `server/router.ts` and follows links, so
 **what is reachable is what gets generated**. A page nothing links to belongs in
-`entryPoints`, or it is not part of the site.
-
-That is also why the blog controller reads the article files: listing them is
-what makes them reachable.
+`entryPoints`, or it is not part of the site. That is also why the home page
+lists the games: listing them is what makes them reachable.
 
 ## Social cards
 
@@ -315,7 +326,7 @@ and a `description`, so a card is registered from those rather than from a
 second list of pages to keep in step:
 
 ```ts
-const image = ogImage(routes.about.href(), About);
+const image = ogImage(routes.tetraDo.href(), TetraDo);
 ```
 
 One call does both halves — it records how to draw the card and returns the URL
@@ -347,7 +358,7 @@ kanji, 2.2MB against the full font's 5.3MB. A character outside that set is
 drawn as nothing at all, so the build says which ones and on which page:
 
 ```
-og: no glyph for 鷗 in /blog/mori-ogai — see server/og/fonts/README.md
+og: no glyph for 鷗 in /tetra-do/rules — see server/og/fonts/README.md
 ```
 
 [`server/og/fonts/README.md`](./server/og/fonts/README.md) has the exact set,
@@ -356,31 +367,30 @@ covers.
 
 ## Markdown content
 
-Each article is a `.md` file under `server/blog/` with `title`, `date`, and
-`summary` front-matter:
+Each game's rules are a `.md` file under `server/games/`, named after the
+game's slug, with `title` and `summary` front-matter:
 
 ```markdown
 ---
-title: Hello, remix-ssg
-date: "2026-07-21"
-summary: How this site is rendered to static HTML at build time.
+title: テトラ道のルール
+summary: 正四面体を120°ずつ回す操作の盤面をなぞり、元の向きに戻る経路を探す。
 ---
 
 Body starts here…
 ```
 
-`server/blog/mod.ts` turns it into a page: front-matter via `@std/front-matter`,
-the body via [`@kuboon/md`](https://jsr.io/@kuboon/md) — GitHub-flavored,
-sanitized, with heading anchors and Shiki-highlighted code. It is the only
-module importing either package, and the only one that reads the files; the two
-screens beside it, `index.tsx` and `article.tsx`, are handed what they render.
-The generator never sees Markdown at all — it serves what this site's own
-controller returns.
+`server/games/mod.ts` turns it into a page: front-matter via
+`@std/front-matter`, the body via [`@kuboon/md`](https://jsr.io/@kuboon/md) —
+GitHub-flavored, sanitized, with heading anchors and Shiki-highlighted code. It
+is the only module importing either package, and the only one that reads the
+files; `client/pages/rules.tsx` beside it is handed what it renders. The
+generator never sees Markdown at all — it serves what this site's own code
+returns.
 
 `mod.ts` finds the files through `import.meta.dirname`, being in the directory
-with them, so no path to the articles is written down anywhere. Nothing serves
-that directory as files, either, which is why the source can sit beside the
-`.md` without becoming a URL.
+with them, so no path to them is written down anywhere. Nothing serves that
+directory as files, either, which is why the source can sit beside the `.md`
+without becoming a URL.
 
 ### Line breaks, and why the formatter leaves prose alone
 
@@ -388,15 +398,14 @@ that directory as files, either, which is why the source can sit beside the
 Markdown file and leaves the words where they were put. It has to: Markdown
 joins the lines of a paragraph with a space, which is invisible between English
 words and a gap in the middle of a Japanese sentence — and a formatter wrapping
-at 80 columns puts one wherever it likes. So an English article wraps at the
-margin, a Japanese one is a line per paragraph, and each is right for what it
-renders to.
+at 80 columns puts one wherever it likes. So English prose wraps at the margin,
+Japanese is a line per sentence, and each is right for what it renders to.
 
 ## Interactive islands (client components)
 
 Most of the site is static HTML. When you need interactivity, use an **island**:
 a component that is server-rendered like everything else, then hydrated in the
-browser. See `client/islands/counter.tsx`.
+browser. See `client/islands/tetra-hud.tsx`, which is the smallest of the four.
 
 To add one:
 
@@ -409,10 +418,11 @@ To add one:
 
 There is no third step: `server/assets.ts` globs `islands/*.tsx`, so the file
 being there is what makes it an entrypoint. A helper a few islands share goes in
-a subdirectory — `islands/_lib/` — which the glob does not reach.
+a subdirectory — `client/games/tetra-do/`, for the four the game's islands share
+— which the glob does not reach.
 
-A page that does not set `hydrate` ships no `<script>` at all — the article
-pages have none.
+A page that does not set `hydrate` ships no `<script>` at all — the home page
+and the rules pages have none.
 
 ### How the client code is compiled
 
@@ -421,16 +431,18 @@ Every island is a browser entrypoint, and all of them go into a _single_
 imports comes out **once**, in a chunk they share:
 
 ```
-client/hydration.js ─┬─→ chunk-…   the Remix UI runtime
-islands/counter.js  ─┤
-islands/total.js    ─┴─→ chunk-…   store.ts
+client/hydration.js      ─┬─→ chunk-…   the Remix UI runtime
+islands/tetra-board.js   ─┤
+islands/tetra-solid.js   ─┤
+islands/tetra-hud.js     ─┤
+islands/tetra-controls.js ┴─→ chunk-…   games/tetra-do/game.ts
 ```
 
-The home page demonstrates why that matters. `counter.tsx` and `total.tsx` are
-separate entrypoints that never reference each other; both import
-`client/islands/store.ts`, and the running total tracks the buttons only because
-that store was emitted once. Compile the entries independently — one bundler
-call each — and each gets a private copy, so the total would sit at zero.
+テトラ道 is why that matters. Its four islands never reference each other; all
+four import `client/games/tetra-do/game.ts`, and the board, the clock and the
+solid agree about the game only because that module was emitted once. Compile
+the entries independently — one bundler call each — and each would get a board
+of its own.
 
 `client/hydration.ts` is an entrypoint like the islands, and the only script the
 shell writes: it calls `run()`, which walks the document for the hydration
@@ -459,22 +471,22 @@ Every URL lives in `client/routes.ts` as a `@remix-run/fetch-router` route map,
 and links go through it:
 
 ```tsx
-<a href={routes.about.href()}>About</a>;
+<a href={routes.tetraDo.href()}>テトラ道</a>;
 ```
 
 The map is built with the deploy prefix as its base, so an href is already
 correct under a repo sub-path or a PR preview URL — `route('', …)` gives
-`/about`, `route('/repo/preview', …)` gives `/repo/preview/about` — and nothing
+`/tetra-do`, `route('/repo/preview', …)` gives `/repo/preview/tetra-do` — and nothing
 has to remember to prepend `base`. That is also why `home` needs no special
 case: the base alone is the home path. Nothing enforces that a route points at a
 page that exists, but nothing needs to: the build crawls the links it finds, so
 a route with no page behind it fails the build.
 
-The blog is in the map too, as `blog: { index: "/blog", show: "/blog/:slug" }`.
-No list of articles belongs there — they are Markdown files discovered at build
-time — but the shape of their URL does, so the listing links with
-`routes.blog.show.href({ slug })`. That call percent-encodes the slug itself,
-which is why nothing around it encodes anything.
+The rules are in the map as `rules: get("/:game/rules")`. One route for every
+game, because they are the same page with a different Markdown file behind it,
+and the home page links each with `routes.rules.href({ game: slug })`. That call
+percent-encodes the slug itself, which is why nothing around it encodes
+anything.
 
 Internal links are plain `<a href>`. On a page with an island the client runtime
 is active, and it turns every internal `<a>` click into a frame navigation: it
@@ -504,23 +516,23 @@ Locally `BASE_URL` is unset and the site is served from `/`. To preview a
 sub-path deployment:
 
 ```sh
-BASE_URL=http://localhost:8000/remix3-ssg-gh-pages deno task dev
+BASE_URL=http://localhost:8000/gunron-do deno task dev
 ```
 
 `deno serve` prints the root URL, but with `BASE_URL` set the site lives under
-the prefix — open <http://localhost:8000/remix3-ssg-gh-pages>.
+the prefix — open <http://localhost:8000/gunron-do>.
 
 ### Which file answers which URL
 
-GitHub Pages serves `/about` from `about.html`, and 404s `/about/` when only
+GitHub Pages serves `/tetra-do` from `tetra-do.html`, and 404s `/tetra-do/` when only
 that file exists. `server/router.ts` states that rule as
 `fileServer = githubPages()`, and the build writes the file it would reach for.
 Deploying somewhere with different rules is a matter of exporting a different
 behavior.
 
 The dev server does not emulate the host — it answers the URLs the routes
-declare, which is the same set for every rule that matters here: `/about` is a
-route, `/about/` is not, and neither is `/about.html`. The one thing Pages is
+declare, which is the same set for every rule that matters here: `/tetra-do` is
+a route, `/tetra-do/` is not, and neither is `/tetra-do.html`. The one thing Pages is
 more forgiving about is that last one, serving a page at the file's own name
 too; a link written that way fails the build here instead, which is the more
 useful direction to be wrong in.
