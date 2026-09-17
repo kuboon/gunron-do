@@ -208,6 +208,8 @@ export class TetraDo {
   /** What a recorded round has left to do, while one is being played back. */
   #pending: Move[] = [];
   #replaying = false;
+  /** Whether a replay is being held where it is. Only a replay can be. */
+  #paused = false;
 
   /** Whether the solid turns under your finger, or waits and checks your answer afterwards. */
   #live = true;
@@ -290,6 +292,10 @@ export class TetraDo {
   /** Whether what is on screen is a recording rather than a game. */
   get replaying(): boolean {
     return this.#replaying;
+  }
+  /** Whether the recording is being held where it is. */
+  get paused(): boolean {
+    return this.#paused;
   }
   /** Everything the player did this round, in order. */
   get moves(): readonly Move[] {
@@ -386,12 +392,27 @@ export class TetraDo {
     this.#emit();
   }
 
+  /**
+   * Holds a recording where it is, or lets it go on.
+   *
+   * Only a recording pauses. A round being played has a clock the player is racing, and stopping
+   * that clock is not a feature — it is the way out of the game.
+   *
+   * @param paused Whether to hold it
+   */
+  setPaused(paused: boolean): void {
+    if (!this.#replaying) return;
+    this.#paused = paused;
+    this.#emit();
+  }
+
   #begin(date: string): void {
     this.#random = mulberry32(hash(`daily-${date}`));
     this.#date = date;
     this.#moves = [];
     this.#pending = [];
     this.#replaying = false;
+    this.#paused = false;
     this.#cells = [];
     this.#fill();
     this.#path = [];
@@ -751,7 +772,11 @@ export class TetraDo {
     // The hold after a clear. Everything stops — the clock, the solid, the sparks' own clock is
     // the browser's — and the frame still goes out, so the freeze is a frame the player sees
     // rather than a stall they feel.
-    if (this.#hitStop > 0) {
+    if (this.#paused) {
+      // A held recording still animates — the solid keeps its momentum and the sparks finish —
+      // but the clock does not move, so nothing new is delivered and nothing runs out.
+      this.#advance(dt);
+    } else if (this.#hitStop > 0) {
       this.#hitStop -= dt;
     } else if (this.#phase === "playing") {
       this.#timeLeft -= dt;

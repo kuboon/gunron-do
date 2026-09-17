@@ -1,5 +1,5 @@
 /**
- * The buttons, the two cards that book-end a round, and the link the round leaves behind.
+ * The buttons, and the two cards that book-end a round.
  *
  * Together because they are the same thing at different moments: every one of them starts a
  * round, changes how one is played, or says what became of one. Keeping them out of the board's
@@ -7,8 +7,13 @@
  * cell.
  *
  * This is also where the URL is read. A page with no day in it is not a page: `readSession`
- * replaces it with today's before anything else happens. A page with a recording in it is a round
- * to watch rather than one to play, and the card says so.
+ * replaces it with today's before anything else happens. A page with a recording in it is not a
+ * board to play but a round to watch, and it starts watching itself — the player already pressed
+ * a button to get here, and asking them to press another one is asking twice.
+ *
+ * Anything that changes the URL leaves through a document navigation, marked `data-rmx-document`.
+ * The page is its URL: the day decides the board, and the board is laid out once, when the island
+ * starts. A frame reload would swap the HTML under a game that is still running on the old day.
  *
  * The rules are on the first card rather than behind a link, because they are four sentences and
  * a player who has to leave to read them has already lost the round. The longer version lives in
@@ -53,14 +58,19 @@ export const TetraControls = clientEntry(
     if (session !== null) game.preview(session.date);
 
     let recording: Recording = { state: session?.rec ? "loading" : "none" };
-    let link: string | null = null;
-    let copied = false;
+    /** Set while the link to a finished round is being built, so the button is pressed once. */
+    let leaving = false;
 
-    if (session?.rec) {
+    // A recording in the URL plays as soon as it has decoded. Until then there is no card: the
+    // few milliseconds it takes are not worth a flash of the rules.
+    if (session !== null && session.rec !== null) {
       decodeMoves(session.rec).then((moves) => {
-        recording = moves === null
-          ? { state: "bad" }
-          : { state: "ready", moves };
+        if (moves === null) {
+          recording = { state: "bad" };
+        } else {
+          recording = { state: "ready", moves };
+          game.startReplay(session.date, moves);
+        }
         handle.update();
       });
     }
@@ -70,19 +80,12 @@ export const TetraControls = clientEntry(
     });
     handle.signal.addEventListener("abort", stop, { once: true });
 
-    /** Builds the link to this round and puts it on the clipboard, where that is allowed. */
-    async function share(): Promise<void> {
-      if (session === null) return;
-      link = shareUrl(session.date, await encodeMoves(game.moves));
-      copied = false;
+    /** Leaves for this round's own URL, which is the round: the day, and what was done on it. */
+    async function replay(): Promise<void> {
+      if (session === null || leaving) return;
+      leaving = true;
       handle.update();
-      try {
-        await navigator.clipboard.writeText(link);
-        copied = true;
-      } catch {
-        // No clipboard, or no permission: the link is on screen to copy by hand.
-      }
-      handle.update();
+      location.href = shareUrl(session.date, await encodeMoves(game.moves));
     }
 
     return () => (
@@ -99,92 +102,94 @@ export const TetraControls = clientEntry(
           >
             {sound.enabled ? "音あり" : "音なし"}
           </button>
-          <button
-            type="button"
-            disabled={game.replaying}
-            aria-pressed={game.live ? "true" : "false"}
-            mix={buttonMix(game.live, () => game.setLive(!game.live))}
-          >
-            なぞり中に立体を回す
-          </button>
-          <a mix={linkButtonStyle} href={boardUrl(todayInTokyo())}>
-            今日の盤面
-          </a>
+          {game.replaying
+            ? (
+              <>
+                <span mix={badgeStyle} role="status">リプレイ中</span>
+                <button
+                  type="button"
+                  disabled={game.phase !== "playing"}
+                  mix={[
+                    buttonStyle,
+                    on<HTMLButtonElement>(
+                      "click",
+                      () => game.setPaused(!game.paused),
+                    ),
+                  ]}
+                >
+                  {game.paused ? "再開" : "一時停止"}
+                </button>
+                <a
+                  mix={linkButtonStyle}
+                  data-rmx-document
+                  href={boardUrl(game.date)}
+                >
+                  自分で挑戦
+                </a>
+              </>
+            )
+            : (
+              <>
+                <button
+                  type="button"
+                  aria-pressed={game.live ? "true" : "false"}
+                  mix={buttonMix(game.live, () => game.setLive(!game.live))}
+                >
+                  なぞり中に立体を回す
+                </button>
+                <a
+                  mix={linkButtonStyle}
+                  data-rmx-document
+                  href={boardUrl(todayInTokyo())}
+                >
+                  今日の盤面
+                </a>
+              </>
+            )}
         </div>
 
-        {game.phase === "ready" && session !== null
+        {game.phase === "ready" && session !== null &&
+            recording.state !== "loading"
           ? (
             <div mix={overlayStyle}>
               <div mix={cardStyle}>
-                {recording.state === "ready"
+                <h2 mix={cardTitleStyle}>遊び方</h2>
+                <p mix={cardTextStyle}>
+                  マスは、床の三角形の頂点{" "}
+                  <b style={{ color: OP_COLORS[0] }}>a</b>{" "}
+                  <b style={{ color: OP_COLORS[1] }}>b</b>{" "}
+                  <b style={{ color: OP_COLORS[2] }}>c</b>{" "}
+                  のまわりに正四面体を120°回す操作です。塗りつぶしの点は時計回り、白抜きの点（<code>
+                    a⁻¹
+                  </code>{" "}
+                  など）は反時計回りです。
+                </p>
+                <p mix={cardTextStyle}>
+                  上下左右に隣り合うマスをなぞると、その順に回転が重なります。四面体が元の向きに戻る経路なら、指を離したときに消えます。
+                </p>
+                <p mix={cardTextStyle}>
+                  得点は、隣り合う打ち消し（<code>a a⁻¹</code>{" "}
+                  など）を除いた長さの2乗です。打ち消し合っている部分は、なぞっている線が細い破線になります。戻らない経路は消えないだけで、時間は減りません。
+                </p>
+                <p mix={cardTextStyle}>
+                  「なぞり中に立体を回す」をオフにすると、立体は指を離してから答え合わせとして動きます。
+                </p>
+                <button
+                  type="button"
+                  mix={[
+                    primaryStyle,
+                    on("click", () => game.start(session.date)),
+                  ]}
+                >
+                  {session.date} の盤面で始める
+                </button>
+                {recording.state === "bad"
                   ? (
-                    <>
-                      <h2 mix={cardTitleStyle}>記録の再生</h2>
-                      <p mix={cardTextStyle}>
-                        {session.date}{" "}
-                        の盤面で遊んだ記録です。同じ盤面を自分でも遊べます。
-                      </p>
-                      <button
-                        type="button"
-                        mix={[
-                          primaryStyle,
-                          on("click", () => {
-                            if (recording.state === "ready") {
-                              game.startReplay(session.date, recording.moves);
-                            }
-                          }),
-                        ]}
-                      >
-                        再生する
-                      </button>
-                      <p mix={cardTextStyle}>
-                        <a mix={quietLinkStyle} href={boardUrl(session.date)}>
-                          この盤面を自分で遊ぶ →
-                        </a>
-                      </p>
-                    </>
+                    <p mix={cardNoteStyle}>
+                      URL の記録が読めませんでした。盤面だけ開いています。
+                    </p>
                   )
-                  : (
-                    <>
-                      <h2 mix={cardTitleStyle}>遊び方</h2>
-                      <p mix={cardTextStyle}>
-                        マスは、床の三角形の頂点{" "}
-                        <b style={{ color: OP_COLORS[0] }}>a</b>{" "}
-                        <b style={{ color: OP_COLORS[1] }}>b</b>{" "}
-                        <b style={{ color: OP_COLORS[2] }}>c</b>{" "}
-                        のまわりに正四面体を120°回す操作です。塗りつぶしの点は時計回り、白抜きの点（<code>
-                          a⁻¹
-                        </code>{" "}
-                        など）は反時計回りです。
-                      </p>
-                      <p mix={cardTextStyle}>
-                        上下左右に隣り合うマスをなぞると、その順に回転が重なります。四面体が元の向きに戻る経路なら、指を離したときに消えます。
-                      </p>
-                      <p mix={cardTextStyle}>
-                        得点は、隣り合う打ち消し（<code>a a⁻¹</code>{" "}
-                        など）を除いた長さの2乗です。打ち消し合っている部分は、なぞっている線が細い破線になります。戻らない経路は消えないだけで、時間は減りません。
-                      </p>
-                      <p mix={cardTextStyle}>
-                        「なぞり中に立体を回す」をオフにすると、立体は指を離してから答え合わせとして動きます。
-                      </p>
-                      <button
-                        type="button"
-                        mix={[
-                          primaryStyle,
-                          on("click", () => game.start(session.date)),
-                        ]}
-                      >
-                        {session.date} の盤面で始める
-                      </button>
-                      {recording.state === "bad"
-                        ? (
-                          <p mix={cardNoteStyle}>
-                            URL の記録が読めませんでした。盤面だけ開いています。
-                          </p>
-                        )
-                        : null}
-                    </>
-                  )}
+                  : null}
               </div>
             </div>
           )
@@ -216,11 +221,13 @@ export const TetraControls = clientEntry(
                       >
                         もう一度再生
                       </button>
-                      <p mix={cardTextStyle}>
-                        <a mix={quietLinkStyle} href={boardUrl(session.date)}>
-                          この盤面を自分で遊ぶ →
-                        </a>
-                      </p>
+                      <a
+                        mix={secondaryLinkStyle}
+                        data-rmx-document
+                        href={boardUrl(session.date)}
+                      >
+                        自分で挑戦
+                      </a>
                     </>
                   )
                   : (
@@ -233,24 +240,20 @@ export const TetraControls = clientEntry(
                       </button>
                       <button
                         type="button"
+                        disabled={leaving}
                         mix={[
                           secondaryStyle,
-                          on("click", () => {
-                            void share();
+                          on<HTMLButtonElement>("click", () => {
+                            void replay();
                           }),
                         ]}
                       >
-                        この試合のURL
+                        {leaving ? "…" : "リプレイ"}
                       </button>
-                      {link === null ? null : (
-                        <p mix={cardNoteStyle}>
-                          {copied
-                            ? "コピーしました。"
-                            : "長押しでコピーできます。"}
-                          <br />
-                          <a mix={shareLinkStyle} href={link}>{link}</a>
-                        </p>
-                      )}
+                      <p mix={cardNoteStyle}>
+                        「リプレイ」を押すと、この試合をなぞり直す URL{" "}
+                        に移ります。そのアドレスを渡せば、相手も同じ試合を見られます。
+                      </p>
                     </>
                   )}
               </div>
@@ -299,7 +302,7 @@ const buttonStyle = css({
   "&:disabled": { opacity: 0.45, cursor: "not-allowed" },
 });
 
-/** The same, for the two that are links because they change the URL rather than the round. */
+/** The same, for the ones that are links because they change the URL rather than the round. */
 const linkButtonStyle = css({
   font: "inherit",
   fontSize: "0.9rem",
@@ -393,17 +396,35 @@ const secondaryStyle = css({
   "&:active": { transform: "translateY(1px)" },
 });
 
-const quietLinkStyle = css({
-  color: ink.muted,
-  fontSize: "0.9rem",
+/** The secondary button's twin, for the one that is a link because it changes the URL. */
+const secondaryLinkStyle = css({
+  display: "inline-block",
+  font: "inherit",
+  textDecoration: "none",
+  marginTop: "0.5rem",
+  marginLeft: "0.5rem",
+  padding: "0.6rem 1.1rem",
+  borderRadius: "10px",
+  border: `1px solid ${surface.edge}`,
+  color: ink.text,
+  "&:active": { transform: "translateY(1px)" },
 });
 
-/** The link itself, which is long and is meant to be selected rather than read. */
-const shareLinkStyle = css({
-  display: "inline-block",
-  marginTop: "0.25rem",
-  color: ink.text,
-  fontSize: "0.7rem",
-  wordBreak: "break-all",
-  lineHeight: 1.4,
+/** Not a button: it says what the page is doing, next to the buttons that change it. */
+const badgeStyle = css({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.4rem",
+  fontSize: "0.9rem",
+  padding: "0.5rem 0.9rem",
+  borderRadius: "10px",
+  border: `1px solid ${OP_COLORS[0]}`,
+  color: OP_COLORS[0],
+  "&::before": {
+    content: '""',
+    width: "0.45rem",
+    height: "0.45rem",
+    borderRadius: "50%",
+    background: OP_COLORS[0],
+  },
 });
