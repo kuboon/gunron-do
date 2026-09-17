@@ -4,7 +4,7 @@
  * Small enough to look like it belongs in the HUD, and in the header instead because that is where
  * it answers its question — a player reads it when they want to know whether the board they are
  * looking at is the one everybody else got today. It is an island of its own only because the
- * header around it is not one; a page cannot know which board a round is on until a round starts.
+ * header around it is not one; the date is in the URL, and the page around it is a static file.
  */
 
 import { clientEntry, css, type Handle } from "@remix-run/ui";
@@ -20,7 +20,11 @@ export const TetraSeed = clientEntry(
     });
     handle.signal.addEventListener("abort", stop, { once: true });
 
-    return () => <span mix={seedStyle}>{game.seedLabel}</span>;
+    return () => (
+      <span mix={seedStyle}>
+        {game.replaying ? `${game.date} の記録` : `${game.date} の盤面`}
+      </span>
+    );
   },
 );
 
