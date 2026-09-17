@@ -30,8 +30,34 @@ import {
   reducedLength,
   slerp,
 } from "./rotation.ts";
-import type { Move } from "./record.ts";
+import { type Move, TICK_MS } from "./record.ts";
 import { sound } from "./sound.ts";
+
+/**
+ * The noises the rules make, as the game asks for them.
+ *
+ * An interface rather than the module directly, because the rules also run with the screen and
+ * the speakers switched off: {@link outcome} plays a recording through as fast as it can to find
+ * out what it comes to, and a hundred rounds of arpeggios in half a second is not the answer.
+ */
+export interface Noises {
+  step(depth: number): void;
+  back(depth: number): void;
+  clear(length: number): void;
+  cancel(): void;
+  tick(seconds: number): void;
+  over(): void;
+}
+
+/** The noises, with nobody listening. */
+const SILENCE: Noises = {
+  step() {},
+  back() {},
+  clear() {},
+  cancel() {},
+  tick() {},
+  over() {},
+};
 
 /** The board is square, and small enough that every cell is in reach of a thumb. */
 export const WIDTH = 5;
@@ -53,9 +79,10 @@ export const URGENT_MS = 10_000;
  * Where the round is in its life, which is also which overlay is up.
  *
  * `counting` is the three seconds before the clock starts: the board is on screen and readable,
- * and nothing it does counts yet.
+ * and nothing it does counts yet. `teaching` is the walkthrough: the board is real and answers to
+ * a finger exactly as it will in a round, but the clock is not running and nothing is at stake.
  */
-export type Phase = "ready" | "counting" | "playing" | "over";
+export type Phase = "ready" | "teaching" | "counting" | "playing" | "over";
 
 /**
  * A number that just moved, for the HUD to make a fuss about.
@@ -215,6 +242,8 @@ export class TetraDo {
   #longestPop: Pop | null = null;
   /** The last single-cell tap, for spotting the second one. */
   #lastTap: { index: number; at: number } | null = null;
+  /** Cells the walkthrough is pointing at, for the board to ring. */
+  #hint: readonly number[] = [];
   #popId = 0;
   #burst: Burst | null = null;
   #shake: Shake | null = null;
@@ -244,14 +273,123 @@ export class TetraDo {
   #flash = 0;
   #glow = 0;
 
+  /**
+   * The game's own clock, in milliseconds since the round began.
+   *
+   * Not the wall's: it stops when the game stops — through a hit-stop, through a pause — and the
+   * things that happen a fixed time after an event hang off it rather than off `setTimeout`. That
+   * is what makes a pause during a clear hold the board where it is, and what lets a recording be
+   * played through at any speed at all and come to the same thing.
+   */
+  #clock = 0;
+  /** What the clock owes, and when. */
+  #due: { at: number; run: () => void }[] = [];
+
   #listeners = new Set<Listener>();
   #frameListeners = new Set<Listener>();
   #frame: number | null = null;
   #last = 0;
 
-  constructor() {
+  /** Where this game's noises go. */
+  readonly #noises: Noises;
+
+  /**
+   * @param noises Where to send the sounds. Left out, they go to the speakers.
+   */
+  constructor(noises: Noises = sound) {
+    this.#noises = noises;
     // Something to look at behind the "how to play" card. It is never played, so any seed will do.
     this.#fill();
+  }
+
+  /**
+   * Moves the game on by `dt` milliseconds, which is the whole of what time does to it.
+   *
+   * Split out from the frame loop so that something other than a frame loop can drive it — a
+   * recording run through at speed, with nobody watching.
+   *
+   * @param dt Milliseconds since the last step
+   */
+  #step(dt: number): void {
+    // The hold after a clear. Everything stops — the clock, the solid, the sparks' own clock is
+    // the browser's — and the frame still goes out, so the freeze is a frame the player sees
+    // rather than a stall they feel.
+    if (this.#paused) {
+      // A held recording still animates — the solid keeps its momentum and the sparks finish —
+      // but the clock does not move, so nothing new is delivered and nothing runs out.
+      this.#advance(dt);
+    } else if (this.#hitStop > 0) {
+      this.#hitStop -= dt;
+    } else if (this.#phase === "counting") {
+      // The board is up and readable, and nothing on it counts yet. The clock has not started,
+      // so a recording's first move cannot land early either.
+      this.#settle(dt);
+      this.#leadIn -= dt;
+      this.#countIn();
+      if (this.#leadIn <= 0) {
+        this.#leadIn = 0;
+        this.#phase = "playing";
+        this.#emit();
+      }
+      this.#advance(dt);
+    } else if (this.#phase === "teaching") {
+      // Everything the board does, none of what the clock does. A lesson cannot run out.
+      this.#settle(dt);
+      this.#advance(dt);
+    } else if (this.#phase === "playing") {
+      this.#settle(dt);
+      this.#timeLeft -= dt;
+      this.#countdown();
+      if (this.#replaying) this.#playback();
+      if (this.#timeLeft <= 0) {
+        this.#timeLeft = 0;
+        this.#phase = "over";
+        this.#path = [];
+        this.#noises.over();
+        this.#emit();
+      }
+      this.#advance(dt);
+    } else {
+      this.#settle(dt);
+      this.#advance(dt);
+    }
+  }
+
+  /**
+   * Runs this round to its end as fast as the arithmetic allows, drawing nothing.
+   *
+   * The step is the recording's own resolution, so no two moves can land in the same step that
+   * were written down as different times. Used by {@link outcome}; a game being played has a
+   * frame loop for this.
+   */
+  runToEnd(): void {
+    // Enough steps for the lead-in and the round, and then some: the loop ends on the phase, and
+    // the count is only here so that a bug cannot hang the page.
+    const limit = (LEAD_IN_MS + ROUND_MS) / TICK_MS + 1000;
+    for (let i = 0; i < limit && this.#phase !== "over"; i++) {
+      this.#step(TICK_MS);
+    }
+  }
+
+  /** Runs the jobs the clock owes, having moved it on. */
+  #settle(dt: number): void {
+    this.#clock += dt;
+    for (;;) {
+      const i = this.#due.findIndex((job) => job.at <= this.#clock);
+      if (i < 0) return;
+      const [job] = this.#due.splice(i, 1);
+      job.run();
+    }
+  }
+
+  /**
+   * Puts a job on the game's clock.
+   *
+   * @param ms How far ahead, in game time
+   * @param run What to do then
+   */
+  #later(ms: number, run: () => void): void {
+    this.#due.push({ at: this.#clock + ms, run });
   }
 
   // --- what the islands read -------------------------------------------------
@@ -317,6 +455,10 @@ export class TetraDo {
   get paused(): boolean {
     return this.#paused;
   }
+  /** The cells the walkthrough is asking for, which the board rings. Empty the rest of the time. */
+  get hint(): readonly number[] {
+    return this.#hint;
+  }
   /** Everything the player did this round, in order. */
   get moves(): readonly Move[] {
     return this.#moves;
@@ -381,6 +523,28 @@ export class TetraDo {
     this.#emit();
   }
 
+  /**
+   * Hands over the board to be practised on: real cells, real rules, no clock.
+   *
+   * The same board the player is about to be given, because the lesson is the game rather than a
+   * picture of it. Whatever they do to it here is undone when the round starts, which deals itself
+   * from the day all over again.
+   */
+  teach(): void {
+    this.#phase = "teaching";
+    this.#emit();
+  }
+
+  /**
+   * Points the board at some cells, or at none.
+   *
+   * @param cells Which cells to ring
+   */
+  setHint(cells: readonly number[]): void {
+    this.#hint = cells;
+    this.#emit();
+  }
+
   /** The same board again, from the top. */
   restart(): void {
     this.start(this.#date);
@@ -428,6 +592,7 @@ export class TetraDo {
     this.#longest = 0;
     this.#solved = 0;
     this.#lastTap = null;
+    this.#hint = [];
     this.#timeLeft = ROUND_MS;
     this.#phase = "playing";
     this.#clearedPop = null;
@@ -436,6 +601,8 @@ export class TetraDo {
     this.#shake = null;
     this.#hitStop = 0;
     this.#spokenSecond = 0;
+    this.#clock = 0;
+    this.#due = [];
     this.#resetSolid();
     this.#phase = "counting";
     this.#leadIn = LEAD_IN_MS;
@@ -492,6 +659,11 @@ export class TetraDo {
 
   // --- tracing ---------------------------------------------------------------
 
+  /** Whether the board is answering to a finger: a round being played, or one being taught on. */
+  #live(): boolean {
+    return this.#phase === "playing" || this.#phase === "teaching";
+  }
+
   /** Starts a trace at a cell. */
   beginTrace(index: number): void {
     if (this.#replaying) return;
@@ -500,9 +672,9 @@ export class TetraDo {
   }
 
   #beginTrace(index: number): void {
-    if (this.#phase !== "playing" || this.#leaving(index)) return;
+    if (!this.#live() || this.#leaving(index)) return;
     this.#path = [index];
-    sound.step(0);
+    this.#noises.step(0);
     this.#resetSolid();
     this.#turn(this.#cells[index].op, TURN_MS);
     this.#emit();
@@ -522,13 +694,13 @@ export class TetraDo {
   }
 
   #extendTrace(index: number): void {
-    if (this.#phase !== "playing" || this.#path.length === 0) return;
+    if (!this.#live() || this.#path.length === 0) return;
     const last = this.#path[this.#path.length - 1];
     if (index === last) return;
 
     if (this.#path.length >= 2 && index === this.#path[this.#path.length - 2]) {
       this.#path.pop();
-      sound.back(reducedLength(this.word));
+      this.#noises.back(reducedLength(this.word));
       this.#turn(opInverse(this.#cells[last].op), TURN_MS);
       this.#emit();
       return;
@@ -542,7 +714,7 @@ export class TetraDo {
     // The ladder climbs with what the trace is worth, not with how long it is: a move that
     // cancels the one before it adds nothing to the score, so it adds nothing to the pitch —
     // and undoes the last rung, which is the same thing the dashed line says.
-    sound.step(Math.max(0, reducedLength(this.word) - 1));
+    this.#noises.step(Math.max(0, reducedLength(this.word) - 1));
     this.#turn(this.#cells[index].op, TURN_MS);
     this.#emit();
   }
@@ -555,7 +727,7 @@ export class TetraDo {
   }
 
   #endTrace(): void {
-    if (this.#phase !== "playing") return;
+    if (!this.#live()) return;
     const word = this.word;
     if (word.length === 0) return;
 
@@ -613,6 +785,7 @@ export class TetraDo {
     if (at - last.at > DOUBLE_TAP_MS) return false;
     // Spent: a third tap starts a new pair rather than erasing again.
     this.#lastTap = null;
+    this.#hint = [];
     return true;
   }
 
@@ -664,19 +837,19 @@ export class TetraDo {
     };
     this.#knock(tier);
     this.#hitStop = HIT_STOP_MS[tier];
-    sound.clear(reduced);
+    this.#noises.clear(reduced);
 
     this.#take(this.#path);
     this.#path = [];
     this.#emit();
 
     const burstId = this.#burst.id;
-    setTimeout(() => {
+    this.#later(BURST_MS, () => {
       // Only if nothing has cleared since: a burst that was replaced is not this one's to clear.
       if (this.#burst?.id !== burstId) return;
       this.#burst = null;
       this.#emit();
-    }, BURST_MS);
+    });
   }
 
   /**
@@ -686,7 +859,7 @@ export class TetraDo {
    * anything; being allowed to clear it is the whole of what it gets.
    */
   #undo(): void {
-    sound.clear(2);
+    this.#noises.clear(2);
     this.#take(this.#path);
     this.#path = [];
     this.#emit();
@@ -701,8 +874,8 @@ export class TetraDo {
    * @param index The cell to take
    */
   #erase(index: number): void {
-    if (this.#phase !== "playing" || this.#leaving(index)) return;
-    sound.back(1);
+    if (!this.#live() || this.#leaving(index)) return;
+    this.#noises.back(1);
     this.#take([index]);
     this.#emit();
   }
@@ -713,11 +886,11 @@ export class TetraDo {
     this.#popping = new Set(
       [...removed].map((index) => this.#cells[index].id),
     );
-    setTimeout(() => {
+    this.#later(POP_MS, () => {
       this.#collapse(removed);
       this.#popping = new Set();
       this.#emit();
-    }, POP_MS);
+    });
   }
 
   /**
@@ -750,7 +923,7 @@ export class TetraDo {
     this.#path = [];
     this.#rightSolid();
     this.#knock("cancel");
-    sound.cancel();
+    this.#noises.cancel();
     this.#emit();
   }
 
@@ -765,12 +938,12 @@ export class TetraDo {
   #knock(strength: Knock): void {
     const id = ++this.#effectId;
     this.#shake = { id, strength };
-    setTimeout(() => {
+    this.#later(SHAKE_MS, () => {
       if (this.#shake?.id === id) {
         this.#shake = null;
         this.#emit();
       }
-    }, SHAKE_MS);
+    });
   }
 
   /** A number's next jump, stamped so the HUD can age it. */
@@ -855,41 +1028,7 @@ export class TetraDo {
     const dt = Math.min(64, now - this.#last);
     this.#last = now;
 
-    // The hold after a clear. Everything stops — the clock, the solid, the sparks' own clock is
-    // the browser's — and the frame still goes out, so the freeze is a frame the player sees
-    // rather than a stall they feel.
-    if (this.#paused) {
-      // A held recording still animates — the solid keeps its momentum and the sparks finish —
-      // but the clock does not move, so nothing new is delivered and nothing runs out.
-      this.#advance(dt);
-    } else if (this.#hitStop > 0) {
-      this.#hitStop -= dt;
-    } else if (this.#phase === "counting") {
-      // The board is up and readable, and nothing on it counts yet. The clock has not started,
-      // so a recording's first move cannot land early either.
-      this.#leadIn -= dt;
-      this.#countIn();
-      if (this.#leadIn <= 0) {
-        this.#leadIn = 0;
-        this.#phase = "playing";
-        this.#emit();
-      }
-      this.#advance(dt);
-    } else if (this.#phase === "playing") {
-      this.#timeLeft -= dt;
-      this.#countdown();
-      if (this.#replaying) this.#playback();
-      if (this.#timeLeft <= 0) {
-        this.#timeLeft = 0;
-        this.#phase = "over";
-        this.#path = [];
-        sound.over();
-        this.#emit();
-      }
-      this.#advance(dt);
-    } else {
-      this.#advance(dt);
-    }
+    this.#step(dt);
 
     for (const listener of this.#frameListeners) listener();
     this.#frame = requestAnimationFrame(this.#tick);
@@ -900,7 +1039,7 @@ export class TetraDo {
     const seconds = Math.ceil(this.#leadIn / 1000);
     if (seconds === this.#spokenLead || seconds <= 0) return;
     this.#spokenLead = seconds;
-    sound.tick(seconds);
+    this.#noises.tick(seconds);
   }
 
   /** Once a second, out loud, for the last ten of them. */
@@ -909,7 +1048,7 @@ export class TetraDo {
     const seconds = Math.ceil(this.#timeLeft / 1000);
     if (seconds === this.#spokenSecond || seconds <= 0) return;
     this.#spokenSecond = seconds;
-    sound.tick(seconds);
+    this.#noises.tick(seconds);
   }
 
   /** Moves the solid one frame along whatever it is doing. */
@@ -976,3 +1115,29 @@ function ease(t: number): number {
  * three hold the same object. Compile them apart and each would get a board of its own.
  */
 export const game: TetraDo = new TetraDo();
+
+/** What a round came to: the three numbers, and nothing about how it looked getting there. */
+export interface Outcome {
+  cleared: number;
+  solved: number;
+  longest: number;
+}
+
+/**
+ * What a recording comes to, worked out without drawing it.
+ *
+ * The rules never needed a screen, and now they do not need the wall's clock either: everything
+ * that happens a fixed time after something else hangs off the game's own clock, so the whole
+ * round can be stepped through in a few milliseconds. That is what lets a shared link say what
+ * the round was worth before anyone presses play.
+ *
+ * @param date The board the round was played on
+ * @param moves What the player did, in order
+ * @returns The three numbers the round ends on
+ */
+export function outcome(date: string, moves: readonly Move[]): Outcome {
+  const run = new TetraDo(SILENCE);
+  run.startReplay(date, moves);
+  run.runToEnd();
+  return { cleared: run.cleared, solved: run.solved, longest: run.longest };
+}
