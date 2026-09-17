@@ -55,11 +55,17 @@ const CELL_GAP = 6;
 /** How far from a cell's centre still counts as that cell, as a fraction of its size. */
 const CELL_REACH = 0.42;
 
-/** Where each letter's mark sits in the cell's triangle: `a` right, `b` top, `c` left. */
+/**
+ * Where each letter's mark sits in the cell's triangle: `a` bottom right, `b` bottom left, `c`
+ * top.
+ *
+ * The triangle is the `e` face seen from the front, and these are where its three corners draw
+ * on screen — so a cell's mark and the same corner of the solid above it are in the same place.
+ */
 const MARK_POSITIONS: readonly (readonly [number, number])[] = [
   [86, 77],
-  [50, 15],
   [14, 77],
+  [50, 15],
 ];
 
 export const TetraBoard = clientEntry(
