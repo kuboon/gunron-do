@@ -42,8 +42,13 @@ export interface Move {
  */
 const VERSION = 2;
 
-/** Times are kept to a hundredth of a second, which is finer than a finger and half the bytes. */
-const TICK_MS = 10;
+/**
+ * Times are kept to a hundredth of a second, which is finer than a finger and half the bytes.
+ *
+ * Exported because it is also the step a recording is run through at when nobody is watching: no
+ * two moves written down as different times should land in the same step.
+ */
+export const TICK_MS = 10;
 
 // --- the wire format ---------------------------------------------------------
 

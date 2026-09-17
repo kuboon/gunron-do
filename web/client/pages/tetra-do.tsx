@@ -1,8 +1,9 @@
 /**
  * テトラ道 — the game, with the screen to itself.
  *
- * The page is a layout and six islands: the solid, the clock, the board, the buttons, the label
- * saying which board this is, and the walkthrough that covers the lot on a first visit. Nothing
+ * The page is a layout and seven islands: the solid, the clock, the board, the panel that covers
+ * the board between rounds, the buttons, the label saying which board this is, and the walkthrough
+ * that covers the lot on a first visit. Nothing
  * of the game is decided here; `games/tetra-do/` holds the rules and the islands read them, which
  * is what lets this file be the one place that says where each part goes.
  *
@@ -24,6 +25,7 @@ import { TetraBoard } from "../islands/tetra-board.tsx";
 import { TetraControls } from "../islands/tetra-controls.tsx";
 import { TetraHud } from "../islands/tetra-hud.tsx";
 import { TetraSeed } from "../islands/tetra-seed.tsx";
+import { TetraPanel } from "../islands/tetra-panel.tsx";
 import { TetraSolid } from "../islands/tetra-solid.tsx";
 import { TetraTutorial } from "../islands/tetra-tutorial.tsx";
 import { findGame } from "../games.ts";
@@ -62,6 +64,16 @@ export default function TetraDoPage(): RemixNode {
       </div>
       <div mix={boardAreaStyle}>
         <TetraBoard />
+      </div>
+      {
+        /*
+        The same grid cell as the board, so the panel covers the board and nothing else: the
+        clock, the solid and the buttons stay where they are and stay readable. A grid area holds
+        as many children as you give it, and they stack in the order they are written.
+      */
+      }
+      <div mix={panelAreaStyle}>
+        <TetraPanel />
       </div>
       <div mix={controlsAreaStyle}>
         <TetraControls />
@@ -144,6 +156,15 @@ const linkStyle = css({
 
 const hudAreaStyle = css({ gridArea: "hud" });
 const boardAreaStyle = css({ gridArea: "board" });
+
+/** Over the board, and only the board. Empty and untouchable when there is no panel up. */
+const panelAreaStyle = css({
+  gridArea: "board",
+  position: "relative",
+  display: "grid",
+  pointerEvents: "none",
+  "& > *": { pointerEvents: "auto" },
+});
 const controlsAreaStyle = css({ gridArea: "controls" });
 
 /**
