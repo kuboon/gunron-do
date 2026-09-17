@@ -27,6 +27,7 @@ import { clientEntry, css, type Handle, on, ref } from "@remix-run/ui";
 import { animateEntrance, animateLayout } from "@remix-run/ui/animation";
 
 import { cellGlyph } from "./_lib/cell.tsx";
+import { refuseDoubleTap } from "./_lib/gestures.ts";
 import {
   type Burst,
   type BurstCell,
@@ -171,6 +172,10 @@ export const TetraBoard = clientEntry(
               }),
               // A long press on a phone would otherwise offer to select the board.
               on("contextmenu", (event) => event.preventDefault()),
+              // And a double tap would otherwise offer to zoom in on it, which on a board whose
+              // own double tap erases a cell is the browser reading the player's gesture as its
+              // own. `refuseDoubleTap` is the whole of the answer.
+              refuseDoubleTap(),
             ]}
           >
             {game.cells.map((cell, index) => (

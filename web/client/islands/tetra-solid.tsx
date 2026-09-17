@@ -15,6 +15,8 @@
 
 import { clientEntry, css, type Handle } from "@remix-run/ui";
 
+import { refuseDoubleTap } from "./_lib/gestures.ts";
+
 import { game, URGENT_MS } from "../games/tetra-do/game.ts";
 import { ink, surface } from "../games/tetra-do/palette.ts";
 import { buildScene, VIEW_BOX } from "../games/tetra-do/solid.ts";
@@ -52,7 +54,7 @@ export const TetraSolid = clientEntry(
       const beat = Math.pow(((ms % 1000) + 1000) % 1000 / 1000, 3);
 
       return (
-        <div mix={wrapStyle}>
+        <div mix={[wrapStyle, refuseDoubleTap()]}>
           {count === null ? null : (
             <span
               mix={game.phase === "counting"
