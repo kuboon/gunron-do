@@ -120,7 +120,29 @@ export const TetraControls = clientEntry(
             : game.replaying
             ? (
               <>
-                <span mix={badgeStyle} role="status">リプレイ中</span>
+                {
+                  /*
+                  The badge is the way back. It was a label that said what the page was doing and
+                  nothing else, which left a recording with no way out of itself short of the
+                  browser's back button — and pressing the thing that says リプレイ中 to get out of
+                  the replay is what a player tries first anyway. `preview` puts the day's board
+                  back and the phase back to `ready`, which is the panel the recording started from,
+                  scoreboard and 再生する and all.
+                */
+                }
+                <button
+                  type="button"
+                  mix={[
+                    badgeStyle,
+                    on<HTMLButtonElement>(
+                      "click",
+                      () => game.preview(game.date),
+                    ),
+                  ]}
+                  aria-label="リプレイを最初に戻す"
+                >
+                  リプレイ中
+                </button>
                 <button
                   type="button"
                   disabled={game.phase !== "playing"}
@@ -250,16 +272,25 @@ const pressedStyle = css({
   borderColor: ink.text,
 });
 
-/** Not a button: it says what the page is doing, next to the buttons that change it. */
+/**
+ * What the page is doing, and the way out of it.
+ *
+ * Coloured rather than outlined like its neighbours because it is the only one of the three that
+ * is also a statement: the dot and the accent say a recording is running, and pressing it stops.
+ */
 const badgeStyle = css({
   display: "inline-flex",
   alignItems: "center",
   gap: "0.4rem",
+  font: "inherit",
   fontSize: "0.9rem",
+  cursor: "pointer",
   padding: "0.5rem 0.9rem",
   borderRadius: "10px",
   border: `1px solid ${OP_COLORS[0]}`,
+  background: "transparent",
   color: OP_COLORS[0],
+  "&:active": { transform: "translateY(1px)" },
   "&::before": {
     content: '""',
     width: "0.45rem",
