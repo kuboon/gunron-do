@@ -437,8 +437,11 @@ const boardStyle = css({
   padding: `${BOARD_PADDING}px`,
   borderRadius: "14px",
   background: surface.board,
-  // The finger is drawing, not scrolling, and a long press is not a text selection.
+  // The finger is drawing, not scrolling, and a long press is not a text selection. On the cells
+  // as well as the board: the page sets a `manipulation` floor over everything inside it, and a
+  // touch that lands on a cell has to be the board's, not the page's.
   touchAction: "none",
+  "& *": { touchAction: "none" },
   userSelect: "none",
   WebkitUserSelect: "none",
   WebkitTouchCallout: "none",

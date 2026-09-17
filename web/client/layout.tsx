@@ -92,6 +92,28 @@ export interface LayoutProps {
   children: RemixNode;
 }
 
+/**
+ * What a `bare` page paints its document, and how a phone is allowed to touch it.
+ *
+ * `touchAction: "manipulation"` for the same reason as the overscroll above it: both are phone
+ * gestures that cost a game more than they give it. A double tap on a document zooms in on what
+ * was tapped; a double tap on a game erases a cell, or presses a button twice, and the zoom that
+ * follows leaves the player looking at a corner of the board with seconds left on the clock.
+ * `manipulation` turns off that one gesture and nothing else — panning and pinch-to-zoom still
+ * work, so a player who wants a closer look can still take one. (`user-scalable=no` in the
+ * viewport meta is the other way to say it, and iOS has ignored it since 10, rightly.)
+ *
+ * @param background What to paint the document, or `undefined` to leave it
+ * @returns The `<body>` style for a page that has been given the screen
+ */
+function bodyStyle(background: string | undefined) {
+  return {
+    background,
+    overscrollBehavior: "none",
+    touchAction: "manipulation",
+  } as const;
+}
+
 /** Where the client runtime lives, and what it pulls in behind it. */
 export interface ClientRuntime {
   src: string;
@@ -139,11 +161,7 @@ export function Layout(props: LayoutProps): RemixNode {
           <link key={href} rel="modulepreload" href={href} />
         ))}
       </head>
-      <body
-        style={bare
-          ? { background: props.background, overscrollBehavior: "none" }
-          : undefined}
-      >
+      <body style={bare ? bodyStyle(props.background) : undefined}>
         {bare ? null : (
           <header mix={[bandStyle, headerStyle]}>
             <a mix={brandStyle} href={routes.home.href()}>gunron-do</a>
