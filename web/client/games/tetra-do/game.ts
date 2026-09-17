@@ -518,7 +518,7 @@ export class TetraDo {
 
     if (this.#path.length >= 2 && index === this.#path[this.#path.length - 2]) {
       this.#path.pop();
-      sound.back(this.#path.length);
+      sound.back(reducedLength(this.word));
       if (this.#live) this.#turn(opInverse(this.#cells[last].op), TURN_MS);
       this.#emit();
       return;
@@ -529,7 +529,10 @@ export class TetraDo {
       this.#leaving(index)
     ) return;
     this.#path.push(index);
-    sound.step(this.#path.length - 1);
+    // The ladder climbs with what the trace is worth, not with how long it is: a move that
+    // cancels the one before it adds nothing to the score, so it adds nothing to the pitch —
+    // and undoes the last rung, which is the same thing the dashed line says.
+    sound.step(Math.max(0, reducedLength(this.word) - 1));
     if (this.#live) this.#turn(this.#cells[index].op, TURN_MS);
     this.#emit();
   }

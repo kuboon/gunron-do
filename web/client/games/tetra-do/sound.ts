@@ -136,9 +136,9 @@ class Sound {
   }
 
   /**
-   * A cell joining the trace: one rung up the ladder per cell.
+   * A cell joining the trace: one rung up the ladder per cell that counts.
    *
-   * @param depth How many cells are in the trace now
+   * @param depth The trace's reduced length, less one — cancelled pairs are not on the ladder
    */
   step(depth: number): void {
     this.#play([{
@@ -149,7 +149,12 @@ class Sound {
     }]);
   }
 
-  /** A cell leaving the trace again, as the finger backs out of it. */
+  /**
+   * A cell leaving the trace again, as the finger backs out of it.
+   *
+   * @param depth The reduced length that is left, which can be more than before: backing out of
+   * a move that was cancelling one restores the rung it was hiding
+   */
   back(depth: number): void {
     this.#play([{
       freq: pitch(Math.max(0, depth)) / 2,
