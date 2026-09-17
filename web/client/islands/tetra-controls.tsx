@@ -80,6 +80,13 @@ export const TetraControls = clientEntry(
     });
     handle.signal.addEventListener("abort", stop, { once: true });
 
+    // The sound button can also change without the game changing: a browser that was holding the
+    // sound back lets it out on the first touch, and the button has to stop asking for one.
+    const stopSound = sound.subscribe(() => {
+      handle.update();
+    });
+    handle.signal.addEventListener("abort", stopSound, { once: true });
+
     /** Leaves for this round's own URL, which is the round: the day, and what was done on it. */
     async function replay(): Promise<void> {
       if (session === null || leaving) return;
@@ -100,7 +107,18 @@ export const TetraControls = clientEntry(
               handle.update();
             })}
           >
-            {sound.enabled ? "音あり" : "音なし"}
+            {
+              /*
+              A recording plays on a page nobody has touched, and a browser will not let such a
+              page make a noise. The button says so, because pressing it — or anything else — is
+              what lifts it.
+            */
+            }
+            {sound.blocked
+              ? "タップで音を出す"
+              : sound.enabled
+              ? "音あり"
+              : "音なし"}
           </button>
           {game.replaying
             ? (
