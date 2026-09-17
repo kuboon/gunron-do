@@ -57,28 +57,33 @@ export const TetraHud = clientEntry(
       const beat = calm ? 0.35 : Math.pow(1 - sinceBeat, 3);
       const depth = 1 - remaining / URGENT_MS;
 
-      const score = age(game.scorePop, now);
+      const cleared = age(game.clearedPop, now);
       const longest = age(game.longestPop, now);
 
       return (
         <div mix={hudStyle}>
           <div mix={rowStyle}>
             <span mix={statStyle}>
-              得点
-              <b mix={valueStyle} style={{ transform: bump(score) }}>
-                {game.score}
+              消去
+              <b mix={valueStyle} style={{ transform: bump(cleared) }}>
+                {game.cleared}
               </b>
-              {score === null ? null : (
+              {cleared === null ? null : (
                 <span
                   mix={popStyle}
-                  style={{ ...float(score, -0.5), color: ink.good }}
+                  style={{ ...float(cleared, -0.5), color: ink.good }}
                 >
-                  {game.scorePop?.text}
+                  {game.clearedPop?.text}
                 </span>
               )}
             </span>
 
-            <span mix={[statStyle, rightStyle]}>
+            <span mix={statStyle}>
+              成立
+              <b mix={valueStyle}>{game.solved}</b>
+            </span>
+
+            <span mix={statStyle}>
               最長
               <b mix={valueStyle} style={{ transform: bump(longest) }}>
                 {game.longest}
@@ -198,6 +203,7 @@ const hudStyle = css({ display: "grid", gap: "0.4rem" });
 const rowStyle = css({
   display: "flex",
   alignItems: "baseline",
+  justifyContent: "space-between",
   gap: "0.75rem",
   fontSize: "0.9rem",
   color: ink.muted,
@@ -214,8 +220,6 @@ const valueStyle = css({
   marginLeft: "0.35rem",
   transformOrigin: "center bottom",
 });
-
-const rightStyle = css({ marginLeft: "auto" });
 
 /**
  * Out of the flow, above the number it belongs to.

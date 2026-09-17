@@ -17,7 +17,7 @@
  */
 
 /** What kind of thing the player did. The order is the wire format; only append to it. */
-const KINDS = ["begin", "extend", "end", "live"] as const;
+const KINDS = ["begin", "extend", "end", "live", "erase"] as const;
 
 /** One thing the player did, and when. */
 export interface Move {
@@ -25,7 +25,7 @@ export interface Move {
   at: number;
   kind: (typeof KINDS)[number];
   /**
-   * What it was done to: the cell, for `begin` and `extend`.
+   * What it was done to: the cell, for `begin`, `extend` and `erase`.
    *
    * `end` ignores it, and `live` carries the setting itself — `1` when the solid turns under the
    * finger, `0` when it waits for the answer.

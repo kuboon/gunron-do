@@ -160,6 +160,18 @@ const HIT_STOP_MS = { medium: 60, large: 110 } as const;
 /** A trace long enough to be worth the full treatment. */
 const LARGE_CLEAR = 5;
 
+/**
+ * From this many cells up, a trace that leans on cancellations is not counted.
+ *
+ * A cancelling pair is two cells that undo each other, so a long trace can be padded with them:
+ * the same short answer, walked the long way round. It still clears — it did come home — but the
+ * cells it took off the board are not added up and it cannot be the longest.
+ */
+const PADDING_LIMIT = 5;
+
+/** Two taps on one cell within this long are one gesture: erase it. */
+const DOUBLE_TAP_MS = 320;
+
 /** A seeded generator, so a date can be a board. */
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -187,14 +199,18 @@ export class TetraDo {
   #path: number[] = [];
   #popping = new Set<number>();
 
-  #score = 0;
+  /** How many cells have been taken off the board by a trace that counted. */
+  #cleared = 0;
+  /** The longest counted trace, in cells. */
   #longest = 0;
-  #clears = 0;
-  #misses = 0;
+  /** How many traces came home. */
+  #solved = 0;
   #timeLeft = ROUND_MS;
   #phase: Phase = "ready";
-  #scorePop: Pop | null = null;
+  #clearedPop: Pop | null = null;
   #longestPop: Pop | null = null;
+  /** The last single-cell tap, for spotting the second one. */
+  #lastTap: { index: number; at: number } | null = null;
   #popId = 0;
   #burst: Burst | null = null;
   #shake: Shake | null = null;
@@ -248,17 +264,17 @@ export class TetraDo {
   get word(): readonly Op[] {
     return this.#path.map((index) => this.#cells[index].op);
   }
-  get score(): number {
-    return this.#score;
+  /** Cells taken off the board by traces that counted. */
+  get cleared(): number {
+    return this.#cleared;
   }
+  /** The longest counted trace, in cells. */
   get longest(): number {
     return this.#longest;
   }
-  get clears(): number {
-    return this.#clears;
-  }
-  get misses(): number {
-    return this.#misses;
+  /** How many traces came home. */
+  get solved(): number {
+    return this.#solved;
   }
   get timeLeft(): number {
     return Math.max(0, this.#timeLeft);
@@ -267,8 +283,8 @@ export class TetraDo {
     return this.#phase;
   }
   /** The score's last jump, or `null` if nothing has scored yet this round. */
-  get scorePop(): Pop | null {
-    return this.#scorePop;
+  get clearedPop(): Pop | null {
+    return this.#clearedPop;
   }
   /** The last time the longest trace was beaten. */
   get longestPop(): Pop | null {
@@ -416,13 +432,13 @@ export class TetraDo {
     this.#cells = [];
     this.#fill();
     this.#path = [];
-    this.#score = 0;
+    this.#cleared = 0;
     this.#longest = 0;
-    this.#clears = 0;
-    this.#misses = 0;
+    this.#solved = 0;
+    this.#lastTap = null;
     this.#timeLeft = ROUND_MS;
     this.#phase = "playing";
-    this.#scorePop = null;
+    this.#clearedPop = null;
     this.#longestPop = null;
     this.#burst = null;
     this.#shake = null;
@@ -462,6 +478,9 @@ export class TetraDo {
           break;
         case "end":
           this.#endTrace();
+          break;
+        case "erase":
+          this.#erase(move.value);
           break;
         case "live":
           this.#setLive(move.value === 1);
@@ -555,16 +574,36 @@ export class TetraDo {
       for (const op of word) this.#turn(op, REPLAY_TURN_MS);
     }
 
+    // One cell is a tap, not a trace. Two of them on the same cell in quick succession are the
+    // way to be rid of a cell you cannot use — the one move in the game that asks nothing of the
+    // group and gives nothing back.
     if (word.length < 2) {
+      const index = this.#path[0];
       this.#path = [];
       this.#rightSolid();
+      if (this.#doubleTapped(index)) {
+        this.#write("erase", index);
+        this.#erase(index);
+        return;
+      }
       this.#emit();
       return;
     }
 
+    const home = isIdentity(compose(word));
     const reduced = reducedLength(word);
-    if (isIdentity(compose(word)) && reduced >= MIN_REDUCED_LENGTH) {
-      this.#clear(reduced);
+
+    if (home && reduced >= MIN_REDUCED_LENGTH) {
+      // A long trace padded with cancelling pairs clears like any other, and counts as one that
+      // came home — but the cells and the length it borrowed from the padding are not credited.
+      this.#solve(word.length >= PADDING_LIMIT && reduced < word.length);
+      return;
+    }
+
+    // Two cells that undo each other. It is not an answer — there is no rotation in it to speak
+    // of — so it does not count as one, but it is allowed to take the pair off the board.
+    if (home && word.length === 2) {
+      this.#undo();
       return;
     }
 
@@ -572,6 +611,26 @@ export class TetraDo {
     // It costs nothing but the time it took — a trace that only cancels itself, and one that
     // simply does not come home, are both just traces that are not there any more.
     this.#cancel();
+  }
+
+  /**
+   * Whether this tap is the second one on the same cell, soon enough to be one gesture.
+   *
+   * The clock is the game's, so a recording taps twice exactly where it tapped twice. A replay
+   * never asks: the erase is in the recording as itself, and asking again would double it.
+   *
+   * @param index The cell that was tapped
+   */
+  #doubleTapped(index: number): boolean {
+    if (this.#replaying || this.#leaving(index)) return false;
+    const at = ROUND_MS - this.#timeLeft;
+    const last = this.#lastTap;
+    this.#lastTap = { index, at };
+    if (last === null || last.index !== index) return false;
+    if (at - last.at > DOUBLE_TAP_MS) return false;
+    // Spent: a third tap starts a new pair rather than erasing again.
+    this.#lastTap = null;
+    return true;
   }
 
   /** Whether a cell is mid-clear, and so not part of the board any more. */
@@ -590,25 +649,31 @@ export class TetraDo {
    *
    * @param reduced The trace's length once the cancellations are out: what it scored on
    */
-  #clear(reduced: number): void {
-    const gain = reduced * reduced;
-    const record = reduced > this.#longest;
-    const tier = reduced >= LARGE_CLEAR ? "large" : "medium";
+  /**
+   * A trace that came home.
+   *
+   * @param padded Whether it leaned on cancellations to reach its length, in which case the
+   * cells and the length are not credited — only that it came home at all
+   */
+  #solve(padded: boolean): void {
+    const cells = this.#path.length;
+    const tier = cells >= LARGE_CLEAR ? "large" : "medium";
 
-    this.#score += gain;
-    this.#clears += 1;
-    this.#longest = Math.max(this.#longest, reduced);
-    this.#scorePop = this.#pop(`+${gain}`);
-    // An arrow rather than the bare number: beside a number that already says `6`, a floating `6`
-    // reads as a second score rather than as the one that just moved.
-    if (record) this.#longestPop = this.#pop(`↑${reduced}`);
+    this.#solved += 1;
+    if (!padded) {
+      const record = cells > this.#longest;
+      this.#cleared += cells;
+      this.#longest = Math.max(this.#longest, cells);
+      this.#clearedPop = this.#pop(`+${cells}`);
+      // An arrow rather than the bare number: beside a number that already says `6`, a floating
+      // `6` reads as a second count rather than as the one that just moved.
+      if (record) this.#longestPop = this.#pop(`↑${cells}`);
+    }
     this.#queue.push({ kind: "flash" });
 
-    const removed = new Set(this.#path);
-    this.#popping = new Set([...removed].map((index) => this.#cells[index].id));
     this.#burst = {
       id: ++this.#effectId,
-      cells: [...removed].map((index) => ({
+      cells: this.#path.map((index) => ({
         index,
         op: this.#cells[index].op,
       })),
@@ -616,16 +681,11 @@ export class TetraDo {
     };
     this.#knock(tier);
     this.#hitStop = HIT_STOP_MS[tier];
-    sound.clear(reduced);
+    sound.clear(reducedLength(this.word));
 
+    this.#take(this.#path);
     this.#path = [];
     this.#emit();
-
-    setTimeout(() => {
-      this.#collapse(removed);
-      this.#popping = new Set();
-      this.#emit();
-    }, POP_MS);
 
     const burstId = this.#burst.id;
     setTimeout(() => {
@@ -634,6 +694,44 @@ export class TetraDo {
       this.#burst = null;
       this.#emit();
     }, BURST_MS);
+  }
+
+  /** Two cells that undo each other, taken off the board without ceremony. */
+  #undo(): void {
+    this.#cleared += this.#path.length;
+    this.#clearedPop = this.#pop(`+${this.#path.length}`);
+    sound.clear(2);
+    this.#take(this.#path);
+    this.#path = [];
+    this.#emit();
+  }
+
+  /**
+   * One cell, gone, because the player asked twice.
+   *
+   * It counts for nothing at all: not the cells, not the length, not a trace that came home. It
+   * is a way of clearing a cell that is in the way, and the cost is the time it takes.
+   *
+   * @param index The cell to take
+   */
+  #erase(index: number): void {
+    if (this.#phase !== "playing" || this.#leaving(index)) return;
+    sound.back(1);
+    this.#take([index]);
+    this.#emit();
+  }
+
+  /** Takes cells off the board: they pop where they are, then the column falls into the gap. */
+  #take(indices: readonly number[]): void {
+    const removed = new Set(indices);
+    this.#popping = new Set(
+      [...removed].map((index) => this.#cells[index].id),
+    );
+    setTimeout(() => {
+      this.#collapse(removed);
+      this.#popping = new Set();
+      this.#emit();
+    }, POP_MS);
   }
 
   /**
@@ -663,7 +761,6 @@ export class TetraDo {
    * the smallest knock the board can give and a sound that is over before it is noticed.
    */
   #cancel(): void {
-    this.#misses += 1;
     this.#path = [];
     this.#rightSolid();
     this.#knock("cancel");
