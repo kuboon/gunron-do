@@ -53,17 +53,19 @@ export const VERTICES: readonly Vec3[] = [
   [-1, -1, 1],
 ];
 
-/** The corner the solid stands on top of. The other three are the floor it stands on. */
+/** The corner the solid stands on top of. */
 export const APEX = 3;
 
 /**
  * Which corner each of `a b c` turns about.
  *
- * The order is the one that makes the labels read the way the floor is drawn — `a` bottom right,
- * `b` top, `c` bottom left — and it is also the assignment under which `a b c` is the identity, so
- * the shortest clearing trace on the board is the three letters in order.
+ * `b` is the corner at the top, and `a` and `c` are the two of the floor's three that read left
+ * and right — `c` left, `a` right, with the near corner unlabelled. Three of the four corners
+ * carry a letter; which three, and in which order, is not free: this is one of the assignments
+ * under which `a b c` is the identity, so the shortest clearing trace on the board stays the
+ * three letters in order.
  */
-export const AXIS_VERTEX: readonly number[] = [0, 2, 1];
+export const AXIS_VERTEX: readonly number[] = [0, 3, 2];
 
 /** How many letters a clearing trace has to have left once the cancellations are taken out. */
 export const MIN_REDUCED_LENGTH = 3;

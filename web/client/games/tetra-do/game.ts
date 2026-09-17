@@ -38,7 +38,7 @@ export const WIDTH = 5;
 export const HEIGHT = 5;
 
 /** One round. Long enough to find a few long traces, short enough to want the next round. */
-export const ROUND_MS = 90_000;
+export const ROUND_MS = 60_000;
 
 /** Where the time bar starts reading as nearly over. */
 export const LOW_TIME_MS = 15_000;

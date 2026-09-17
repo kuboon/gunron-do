@@ -154,27 +154,14 @@ export const TetraControls = clientEntry(
             <div mix={overlayStyle}>
               <div mix={cardStyle}>
                 <h2 mix={cardTitleStyle}>遊び方</h2>
-                <p mix={cardTextStyle}>
-                  1マスは、正四面体を頂点{" "}
-                  <b style={{ color: OP_COLORS[0] }}>a</b>{" "}
-                  <b style={{ color: OP_COLORS[1] }}>b</b>{" "}
-                  <b style={{ color: OP_COLORS[2] }}>c</b>{" "}
-                  のまわりに120°回す操作。塗りつぶしは時計回り、白抜き（<code>
-                    a⁻¹
-                  </code>）は反時計回り。
-                </p>
                 <ul mix={cardListStyle}>
-                  <li>隣り合うマスをなぞると、回転が順に重なる。</li>
-                  <li>
-                    指を離したとき四面体が<b>
-                      元の向き
-                    </b>なら、なぞった道が消える。
-                  </li>
+                  <li>盤面をなぞるとテトラが回ります</li>
+                  <li>テトラを元通りに戻せる道筋を探そう</li>
                   <li>
                     <code>a</code> <code>a⁻¹</code>{" "}
-                    のように打ち消し合うマスも消えるが、数には入らない。
+                    のような単純な打ち消しはスコアになりません
                   </li>
-                  <li>ダブルタップで1マスだけ消せる。</li>
+                  <li>ダブルタップで1マス消せます</li>
                 </ul>
                 <button
                   type="button"

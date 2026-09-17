@@ -33,8 +33,14 @@ export interface Move {
   value: number;
 }
 
-/** Bumped if the format ever changes, so an old link is refused rather than misread. */
-const VERSION = 1;
+/**
+ * Bumped if the format ever changes, so an old link is refused rather than misread.
+ *
+ * 2 is the round going from ninety seconds to sixty. The bytes did not change, but what they
+ * mean did: a round recorded against the longer clock would lose its last third here, and a
+ * replay that quietly stops short is worse than one that says it cannot read the link.
+ */
+const VERSION = 2;
 
 /** Times are kept to a hundredth of a second, which is finer than a finger and half the bytes. */
 const TICK_MS = 10;
