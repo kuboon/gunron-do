@@ -3,10 +3,10 @@
  * down.
  *
  * The drawing answers one question — *which of the twelve rotations are you in right now* — so it
- * is built around the two things that answer it. The floor is fixed: the three corners `a b c`
- * turn about stay where they are, drawn under the solid, because an axis that moved with the solid
- * would tell a player nothing. And one face carries an `e`, so the home orientation is a thing you
- * recognise rather than something the game has to announce.
+ * is built around the two things that answer it. The axes are fixed: the corners `a b c` turn
+ * about are marked where they are in space and stay there, because an axis that moved with the
+ * solid would tell a player nothing. And one face carries an `e`, so the home orientation is a
+ * thing you recognise rather than something the game has to announce.
  *
  * This module is geometry only. It takes an orientation and gives back numbers; the island renders
  * them. Keeping it that way is what lets the same scene be drawn for a still frame and for every
@@ -40,7 +40,7 @@ export interface Face {
   markTransform: string | null;
 }
 
-/** A corner of the floor triangle: where a move's axis meets the ground. */
+/** A letter sitting on the corner it turns about, out beyond the solid. */
 export interface Marker {
   x: number;
   y: number;
@@ -50,8 +50,6 @@ export interface Marker {
 
 /** Everything one frame of the solid needs, in draw order. */
 export interface Scene {
-  /** The floor triangle's `points`. */
-  floor: string;
   markers: readonly Marker[];
   /** The axis being turned about, while a turn is running. */
   axis:
@@ -111,35 +109,30 @@ function project(v: Vec3): [number, number, number] {
   return [w[0] * SCALE, -w[1] * SCALE + 0.35, w[2]];
 }
 
-// --- the fixed floor ---------------------------------------------------------
+// --- the fixed letters -------------------------------------------------------
 
 /** Every corner, projected once: at the home orientation they do not move. */
 const CORNER_POINTS = VERTICES.map(project);
 
-/** The floor's three, which never move at all — that is the point of them. */
-const FLOOR_POINTS = [0, 1, 2].map((i) => CORNER_POINTS[i]);
-
-const FLOOR_CENTER: [number, number] = [
-  (FLOOR_POINTS[0][0] + FLOOR_POINTS[1][0] + FLOOR_POINTS[2][0]) / 3,
-  (FLOOR_POINTS[0][1] + FLOOR_POINTS[1][1] + FLOOR_POINTS[2][1]) / 3,
+/** The middle of the solid on screen, which the letters are pushed away from. */
+const CENTER: [number, number] = [
+  CORNER_POINTS.reduce((sum, p) => sum + p[0], 0) / CORNER_POINTS.length,
+  CORNER_POINTS.reduce((sum, p) => sum + p[1], 0) / CORNER_POINTS.length,
 ];
 
-/** Pushes a floor point out from the centre, so the floor reads as ground under the solid. */
+/** Pushes a point out from the middle, so a letter sits off the solid rather than on it. */
 function spread(p: readonly number[]): [number, number] {
   return [
-    FLOOR_CENTER[0] + (p[0] - FLOOR_CENTER[0]) * 1.22,
-    FLOOR_CENTER[1] + (p[1] - FLOOR_CENTER[1]) * 1.22,
+    CENTER[0] + (p[0] - CENTER[0]) * 1.22,
+    CENTER[1] + (p[1] - CENTER[1]) * 1.22,
   ];
 }
 
-const FLOOR = FLOOR_POINTS.map(spread).map((p) => `${p[0]},${p[1]}`).join(" ");
-
 /**
- * The three letters, each sitting on the corner it turns about.
+ * The three letters, each sitting just outside the corner it turns about.
  *
- * Pushed out from the floor's centre like the floor itself, so a marker sits clear of the solid
- * rather than on top of it — which for the corner at the top means pushed upward, away from the
- * face the `e` is painted on.
+ * They do not move: the axes are fixed in space, and a letter that travelled with the solid would
+ * be telling the player where the solid is rather than where the axis is.
  */
 const MARKERS: readonly Marker[] = [0, 1, 2].map((k) => {
   const [x, y] = spread(CORNER_POINTS[AXIS_VERTEX[k]]);
@@ -193,7 +186,7 @@ export const MARKED_FACE: number = MARK.index;
  *
  * @param orientation Where the solid is right now — mid-turn, most of the time
  * @param axis The corner being turned about (`0 1 2`), or `null` when nothing is turning
- * @returns The floor, the markers, the axis line and the faces, back to front
+ * @returns The markers, the axis line and the faces, back to front
  */
 export function buildScene(orientation: Quat, axis: number | null): Scene {
   const corners = VERTICES.map((v) => project(rotate(orientation, v)));
@@ -231,7 +224,6 @@ export function buildScene(orientation: Quat, axis: number | null): Scene {
   );
 
   return {
-    floor: FLOOR,
     markers: MARKERS,
     axis: axis === null ? null : axisLine(axis),
     faces,

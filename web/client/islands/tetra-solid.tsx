@@ -56,13 +56,6 @@ export const TetraSolid = clientEntry(
             </filter>
           </defs>
 
-          <polygon
-            points={scene.floor}
-            fill={surface.board}
-            stroke={surface.edge}
-            stroke-width=".03"
-          />
-
           {scene.axis
             ? (
               <line
