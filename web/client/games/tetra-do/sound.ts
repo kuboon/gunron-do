@@ -8,9 +8,10 @@
  * this game needs.
  *
  * Two rules the browser imposes shape the API. A context created before a gesture starts
- * suspended, so the context is made on the first sound rather than at import — by which time the
- * player has pressed "start". And a sound that cannot be turned off is a sound that gets the tab
- * muted, so {@link Sound.toggle} is on the screen and remembered.
+ * suspended, so the context is made on the first sound rather than at import — and where even
+ * that is too early, because a recording opens playing and nobody has touched the page yet, the
+ * next touch anywhere is taken as the one that starts it. And a sound that cannot be turned off
+ * is a sound that gets the tab muted, so {@link Sound.toggle} is on the screen and remembered.
  *
  * The pitches come off a pentatonic ladder, which is the cheap way to make a run of notes that
  * cannot sound wrong: the player hears a trace get longer as the ladder climbs, and no
@@ -58,11 +59,39 @@ class Sound {
   #context: AudioContext | null = null;
   #enabled = true;
   #loaded = false;
+  /** The listeners waiting for a gesture to start the context with, while one is waiting. */
+  #waiting: AbortController | null = null;
+  /** Who wants telling when {@link Sound.blocked} changes. */
+  #listeners = new Set<() => void>();
 
   /** Whether sounds play. Read on every call, so toggling is immediate. */
   get enabled(): boolean {
     this.#load();
     return this.#enabled;
+  }
+
+  /**
+   * Whether sound is on but the browser is not letting it out yet.
+   *
+   * True only in the one case that needs saying out loud: a recording playing on a page nobody
+   * has touched. One touch anywhere clears it.
+   */
+  get blocked(): boolean {
+    return this.enabled && this.#context?.state === "suspended";
+  }
+
+  /**
+   * Called when the browser lets the sound out, so a button that says otherwise can stop saying
+   * it. Nothing else here changes without the caller knowing.
+   *
+   * @param listener What to run
+   * @returns The way to stop listening
+   */
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
   }
 
   /** Turns the sound on or off, and remembers which. */
@@ -98,8 +127,45 @@ class Sound {
     if (!this.enabled) return null;
     if (typeof AudioContext === "undefined") return null;
     this.#context ??= new AudioContext();
-    if (this.#context.state === "suspended") void this.#context.resume();
+    if (this.#context.state === "suspended") {
+      void this.#context.resume();
+      this.#waitForGesture();
+    }
     return this.#context;
+  }
+
+  /**
+   * Arranges for the next touch anywhere on the page to start the context.
+   *
+   * A browser only starts a context from inside a gesture's own handler, and a recording plays
+   * itself: the page opens and the first sound arrives with nobody having touched anything, so
+   * the `resume` above is refused and the round would go by in silence. This takes the next
+   * touch — any touch, on any part of the page — and resumes from inside it.
+   *
+   * It stops listening once the context is running, and it is never armed twice.
+   */
+  #waitForGesture(): void {
+    if (this.#waiting !== null || typeof document === "undefined") return;
+    this.#waiting = new AbortController();
+
+    const start = (): void => {
+      const context = this.#context;
+      if (context === null) return;
+      void context.resume().then(() => {
+        if (context.state !== "running") return;
+        this.#waiting?.abort();
+        this.#waiting = null;
+        for (const listener of this.#listeners) listener();
+      });
+    };
+
+    for (const type of ["pointerdown", "keydown", "touchend"]) {
+      document.addEventListener(type, start, {
+        capture: true,
+        passive: true,
+        signal: this.#waiting.signal,
+      });
+    }
   }
 
   /** Plays a handful of notes. Each is an oscillator and an envelope, and nothing else. */
