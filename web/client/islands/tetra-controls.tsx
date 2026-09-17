@@ -129,22 +129,13 @@ export const TetraControls = clientEntry(
               </>
             )
             : (
-              <>
-                <button
-                  type="button"
-                  aria-pressed={game.live ? "true" : "false"}
-                  mix={buttonMix(game.live, () => game.setLive(!game.live))}
-                >
-                  なぞり中に立体を回す
-                </button>
-                <a
-                  mix={linkButtonStyle}
-                  data-rmx-document
-                  href={boardUrl(todayInTokyo())}
-                >
-                  今日の盤面
-                </a>
-              </>
+              <a
+                mix={linkButtonStyle}
+                data-rmx-document
+                href={boardUrl(todayInTokyo())}
+              >
+                今日の盤面
+              </a>
             )}
         </div>
 

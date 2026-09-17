@@ -40,14 +40,22 @@ export const HEIGHT = 5;
 /** One round. Long enough to find a few long traces, short enough to want the next round. */
 export const ROUND_MS = 60_000;
 
+/** Three, two, one: the pause between pressing start and the clock starting. */
+export const LEAD_IN_MS = 3_000;
+
 /** Where the time bar starts reading as nearly over. */
 export const LOW_TIME_MS = 15_000;
 
 /** Where it starts counting out loud, and the screen starts pressing. */
 export const URGENT_MS = 10_000;
 
-/** Where the round is in its life, which is also which overlay is up. */
-export type Phase = "ready" | "playing" | "over";
+/**
+ * Where the round is in its life, which is also which overlay is up.
+ *
+ * `counting` is the three seconds before the clock starts: the board is on screen and readable,
+ * and nothing it does counts yet.
+ */
+export type Phase = "ready" | "counting" | "playing" | "over";
 
 /**
  * A number that just moved, for the HUD to make a fuss about.
@@ -129,11 +137,14 @@ type Step =
   }
   | { kind: "flash" };
 
-/** How long one turn takes when nothing is queued behind it. */
-const TURN_MS = 200;
-
-/** A turn during the after-the-fact replay, where the whole trace has to play out. */
-const REPLAY_TURN_MS = 110;
+/**
+ * How long one turn takes when nothing is queued behind it.
+ *
+ * Slow enough to read. The solid always turns under the finger now, so this is the price of
+ * watching it: a player who follows every turn pays for the look in the only currency the round
+ * has, which is the clock.
+ */
+const TURN_MS = 300;
 
 /** The pause before the solid gives up and rights itself after a trace that did not clear. */
 const RIGHTING_DELAY_MS = 200;
@@ -197,6 +208,8 @@ export class TetraDo {
   /** How many traces came home. */
   #solved = 0;
   #timeLeft = ROUND_MS;
+  /** What is left of the lead-in, while one is running. */
+  #leadIn = 0;
   #phase: Phase = "ready";
   #clearedPop: Pop | null = null;
   #longestPop: Pop | null = null;
@@ -208,6 +221,8 @@ export class TetraDo {
   #effectId = 0;
   #hitStop = 0;
   #spokenSecond = 0;
+  /** The last lead-in second counted out loud, so each is counted once. */
+  #spokenLead = 0;
   /** The board's day, as it is written in the URL. */
   #date = "";
   /** What the player did this round, for the link at the end of it. */
@@ -217,9 +232,6 @@ export class TetraDo {
   #replaying = false;
   /** Whether a replay is being held where it is. Only a replay can be. */
   #paused = false;
-
-  /** Whether the solid turns under your finger, or waits and checks your answer afterwards. */
-  #live = true;
 
   #random: () => number = mulberry32(1);
 
@@ -289,8 +301,9 @@ export class TetraDo {
   get shake(): Shake | null {
     return this.#shake;
   }
-  get live(): boolean {
-    return this.#live;
+  /** Milliseconds left of the lead-in: `3000` down to `0`, and `0` once the round is running. */
+  get leadIn(): number {
+    return this.#leadIn;
   }
   /** The board's day. Also the seed, and half of what a round's link is made of. */
   get date(): string {
@@ -387,18 +400,6 @@ export class TetraDo {
     this.#emit();
   }
 
-  /** Turns the solid under the finger, or saves it for the answer. */
-  setLive(live: boolean): void {
-    if (this.#replaying) return;
-    this.#write("live", live ? 1 : 0);
-    this.#setLive(live);
-  }
-
-  #setLive(live: boolean): void {
-    this.#live = live;
-    this.#emit();
-  }
-
   /**
    * Holds a recording where it is, or lets it go on.
    *
@@ -436,10 +437,9 @@ export class TetraDo {
     this.#hitStop = 0;
     this.#spokenSecond = 0;
     this.#resetSolid();
-
-    // The setting the round is played under is part of the round: a recording that did not carry
-    // it would play back through whichever way the *viewer* last left the button.
-    this.#write("live", this.#live ? 1 : 0);
+    this.#phase = "counting";
+    this.#leadIn = LEAD_IN_MS;
+    this.#spokenLead = 0;
   }
 
   // --- the record ------------------------------------------------------------
@@ -474,7 +474,9 @@ export class TetraDo {
           this.#erase(move.value);
           break;
         case "live":
-          this.#setLive(move.value === 1);
+          // Retired: the solid always turns under the finger now. Recordings made before that
+          // still carry the setting, and they still play — it only ever changed the animation,
+          // never what the trace was worth.
           break;
       }
     }
@@ -501,10 +503,8 @@ export class TetraDo {
     if (this.#phase !== "playing" || this.#leaving(index)) return;
     this.#path = [index];
     sound.step(0);
-    if (this.#live) {
-      this.#resetSolid();
-      this.#turn(this.#cells[index].op, TURN_MS);
-    }
+    this.#resetSolid();
+    this.#turn(this.#cells[index].op, TURN_MS);
     this.#emit();
   }
 
@@ -529,7 +529,7 @@ export class TetraDo {
     if (this.#path.length >= 2 && index === this.#path[this.#path.length - 2]) {
       this.#path.pop();
       sound.back(reducedLength(this.word));
-      if (this.#live) this.#turn(opInverse(this.#cells[last].op), TURN_MS);
+      this.#turn(opInverse(this.#cells[last].op), TURN_MS);
       this.#emit();
       return;
     }
@@ -543,7 +543,7 @@ export class TetraDo {
     // cancels the one before it adds nothing to the score, so it adds nothing to the pitch —
     // and undoes the last rung, which is the same thing the dashed line says.
     sound.step(Math.max(0, reducedLength(this.word) - 1));
-    if (this.#live) this.#turn(this.#cells[index].op, TURN_MS);
+    this.#turn(this.#cells[index].op, TURN_MS);
     this.#emit();
   }
 
@@ -558,12 +558,6 @@ export class TetraDo {
     if (this.#phase !== "playing") return;
     const word = this.word;
     if (word.length === 0) return;
-
-    // With the solid held back, the whole trace plays out now as the answer to it.
-    if (!this.#live) {
-      this.#resetSolid();
-      for (const op of word) this.#turn(op, REPLAY_TURN_MS);
-    }
 
     // One cell is a tap, not a trace. Two of them on the same cell in quick succession are the
     // way to be rid of a cell you cannot use — the one move in the game that asks nothing of the
@@ -870,6 +864,17 @@ export class TetraDo {
       this.#advance(dt);
     } else if (this.#hitStop > 0) {
       this.#hitStop -= dt;
+    } else if (this.#phase === "counting") {
+      // The board is up and readable, and nothing on it counts yet. The clock has not started,
+      // so a recording's first move cannot land early either.
+      this.#leadIn -= dt;
+      this.#countIn();
+      if (this.#leadIn <= 0) {
+        this.#leadIn = 0;
+        this.#phase = "playing";
+        this.#emit();
+      }
+      this.#advance(dt);
     } else if (this.#phase === "playing") {
       this.#timeLeft -= dt;
       this.#countdown();
@@ -889,6 +894,14 @@ export class TetraDo {
     for (const listener of this.#frameListeners) listener();
     this.#frame = requestAnimationFrame(this.#tick);
   };
+
+  /** Three, two, one — each counted once, on the way in. */
+  #countIn(): void {
+    const seconds = Math.ceil(this.#leadIn / 1000);
+    if (seconds === this.#spokenLead || seconds <= 0) return;
+    this.#spokenLead = seconds;
+    sound.tick(seconds);
+  }
 
   /** Once a second, out loud, for the last ten of them. */
   #countdown(): void {

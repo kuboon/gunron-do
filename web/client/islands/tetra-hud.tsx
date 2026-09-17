@@ -122,19 +122,6 @@ export const TetraHud = clientEntry(
                 style={{ width: `${(remaining / ROUND_MS) * 100}%` }}
               />
             </div>
-            {urgent
-              ? (
-                <span
-                  mix={countdownStyle}
-                  style={{
-                    transform: `scale(${1 + 0.35 * beat})`,
-                    opacity: 0.7 + 0.3 * beat,
-                  }}
-                >
-                  {Math.ceil(remaining / 1000)}
-                </span>
-              )
-              : null}
           </div>
         </div>
       );
@@ -199,8 +186,8 @@ function float(
 // --- styles -----------------------------------------------------------------
 
 /**
- * Stacked above what comes after it, because the countdown hangs below the bar and out of this
- * area — into the solid's, which is drawn later and would otherwise paint straight over it.
+ * Stacked above what comes after it. The urgency vignette lives in here and is fixed to the
+ * viewport; the board and the solid are drawn later, and would otherwise paint over it.
  */
 const hudStyle = css({
   display: "grid",
@@ -255,24 +242,6 @@ const popLeftStyle = css({
 });
 
 const barWrapStyle = css({ position: "relative" });
-
-/**
- * The seconds, under the right end of the bar, once there are few enough to count.
- *
- * On the beat rather than smooth: a number that grows and settles twice a second is harder to
- * ignore than one that merely changes, which is the point of it being there at all.
- */
-const countdownStyle = css({
-  position: "absolute",
-  right: "0",
-  top: "calc(100% + 0.1rem)",
-  fontSize: "1.45rem",
-  fontWeight: 700,
-  fontVariantNumeric: "tabular-nums",
-  color: ink.bad,
-  pointerEvents: "none",
-  transformOrigin: "right top",
-});
 
 /**
  * The red closing in from the edges of the screen.
