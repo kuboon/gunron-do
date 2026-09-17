@@ -26,6 +26,8 @@ import {
   ROUND_MS,
   URGENT_MS,
 } from "../games/tetra-do/game.ts";
+import { refuseDoubleTap } from "./_lib/gestures.ts";
+
 import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
 
 /** How long a pop lives. Long enough to read, short enough to be gone by the next trace. */
@@ -61,7 +63,7 @@ export const TetraHud = clientEntry(
       const longest = age(game.longestPop, now);
 
       return (
-        <div mix={hudStyle}>
+        <div mix={[hudStyle, ...refuseDoubleTap()]}>
           <div mix={rowStyle}>
             <span mix={statStyle}>
               消去

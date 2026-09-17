@@ -27,6 +27,7 @@ import { clientEntry, css, type Handle, on, ref } from "@remix-run/ui";
 import { animateEntrance, animateLayout } from "@remix-run/ui/animation";
 
 import { cellGlyph } from "./_lib/cell.tsx";
+import { refuseDoubleTap, refuseZoomGestures } from "./_lib/gestures.ts";
 import {
   type Burst,
   type BurstCell,
@@ -112,7 +113,14 @@ export const TetraBoard = clientEntry(
 
     function attach(node: Element | null): void {
       board = node as HTMLElement | null;
-      if (node === null || typeof ResizeObserver === "undefined") return;
+      if (node === null) return;
+
+      // The board is the one place on the page that has already given up scrolling, so it is the
+      // one place that can refuse a touch outright — and refusing it is what keeps a double tap
+      // the game's rather than the browser's.
+      refuseZoomGestures(node, handle.signal);
+
+      if (typeof ResizeObserver === "undefined") return;
 
       // The line is drawn in pixels, so it has to be told when the board stops being the size it
       // was — a phone turning on its side, or the two-column layout taking over.
@@ -171,6 +179,10 @@ export const TetraBoard = clientEntry(
               }),
               // A long press on a phone would otherwise offer to select the board.
               on("contextmenu", (event) => event.preventDefault()),
+              // And a double tap would otherwise offer to zoom in on it, which on a board whose
+              // own double tap erases a cell is the browser reading the player's gesture as its
+              // own. `refuseDoubleTap` is the whole of the answer.
+              ...refuseDoubleTap(),
             ]}
           >
             {game.cells.map((cell, index) => (
@@ -437,8 +449,11 @@ const boardStyle = css({
   padding: `${BOARD_PADDING}px`,
   borderRadius: "14px",
   background: surface.board,
-  // The finger is drawing, not scrolling, and a long press is not a text selection.
+  // The finger is drawing, not scrolling, and a long press is not a text selection. On the cells
+  // as well as the board: the page sets a `manipulation` floor over everything inside it, and a
+  // touch that lands on a cell has to be the board's, not the page's.
   touchAction: "none",
+  "& *": { touchAction: "none" },
   userSelect: "none",
   WebkitUserSelect: "none",
   WebkitTouchCallout: "none",

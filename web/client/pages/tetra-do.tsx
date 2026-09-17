@@ -107,6 +107,13 @@ const screenStyle = css({
   paddingTop: "max(0.75rem, env(safe-area-inset-top))",
   paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))",
   color: ink.text,
+  // Said on the document too, in `Layout`, and said again here on every box inside the page.
+  // Two reasons for the repetition: an engine may treat `touch-action` on the root and the body
+  // as the viewport's rather than an element's, and WebKit has not always looked past the element
+  // a tap actually landed on. At zero specificity, so it is a floor rather than a ceiling — the
+  // board sets `none` over the top of it, which is what a trace needs.
+  touchAction: "manipulation",
+  ":where(&) :where(*)": { touchAction: "manipulation" },
   fontFamily:
     '"Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif',
   gridTemplateAreas: `"head" "hud" "solid" "board" "controls" "nav"`,
