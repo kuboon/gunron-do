@@ -17,7 +17,7 @@ import { clientEntry, css, type Handle, on } from "@remix-run/ui";
 
 import { game } from "../games/tetra-do/game.ts";
 import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
-import { boardUrl, todayInTokyo } from "../games/tetra-do/session.ts";
+import { playUrl, todayInTokyo } from "../games/tetra-do/session.ts";
 import { sound } from "../games/tetra-do/sound.ts";
 import { tutorial } from "../games/tetra-do/tutorial.ts";
 
@@ -137,7 +137,7 @@ export const TetraControls = clientEntry(
                 <a
                   mix={linkButtonStyle}
                   data-rmx-document
-                  href={boardUrl(game.date)}
+                  href={playUrl(game.date)}
                 >
                   自分で挑戦
                 </a>
@@ -147,7 +147,7 @@ export const TetraControls = clientEntry(
               <a
                 mix={linkButtonStyle}
                 data-rmx-document
-                href={boardUrl(todayInTokyo())}
+                href={playUrl(todayInTokyo())}
               >
                 今日の盤面
               </a>

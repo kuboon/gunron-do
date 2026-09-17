@@ -7,8 +7,9 @@
  * solid and the buttons left where they are. A wash over the whole screen dimmed the things the
  * player still wanted to read; this covers only what has nothing to say yet.
  *
- * This is also where the URL is read. A page with no day in it is not a page: `readSession`
- * replaces it with today's before anything else happens.
+ * This is also where the URL is read — read and nothing else. A page with no day in it is
+ * today's board, left at the address it was asked for; `readSession` reports that rather than
+ * navigating anywhere.
  *
  * And it is what starts a recording. A browser will not let a page make a noise until someone has
  * touched it, so a recording that started itself played in silence; a recording that starts on a
@@ -26,7 +27,7 @@ import {
   type Move,
 } from "../games/tetra-do/record.ts";
 import {
-  boardUrl,
+  playUrl,
   readSession,
   type Session,
   shareUrl,
@@ -43,8 +44,8 @@ type Recording =
 export const TetraPanel = clientEntry(
   import.meta.url,
   function TetraPanel(handle: Handle) {
-    // On the server there is no URL to read and nothing to redirect; the panel renders as it would
-    // for a page that has not decided yet, and hydration settles it.
+    // On the server there is no URL to read, so there is no board to be about yet; the panel
+    // renders nothing and hydration settles it.
     const session: Session | null = typeof location === "undefined"
       ? null
       : readSession();
@@ -128,7 +129,7 @@ export const TetraPanel = clientEntry(
               <a
                 mix={secondaryLinkStyle}
                 data-rmx-document
-                href={boardUrl(session.date)}
+                href={playUrl(session.date)}
               >
                 自分で挑戦
               </a>
@@ -211,7 +212,7 @@ export const TetraPanel = clientEntry(
                     <a
                       mix={secondaryLinkStyle}
                       data-rmx-document
-                      href={boardUrl(session.date)}
+                      href={playUrl(session.date)}
                     >
                       自分で挑戦
                     </a>
