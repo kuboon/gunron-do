@@ -54,7 +54,7 @@ export const TetraSolid = clientEntry(
       const beat = Math.pow(((ms % 1000) + 1000) % 1000 / 1000, 3);
 
       return (
-        <div mix={[wrapStyle, refuseDoubleTap()]}>
+        <div mix={[wrapStyle, ...refuseDoubleTap()]}>
           {count === null ? null : (
             <span
               mix={game.phase === "counting"

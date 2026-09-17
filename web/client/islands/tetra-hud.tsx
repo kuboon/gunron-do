@@ -63,7 +63,7 @@ export const TetraHud = clientEntry(
       const longest = age(game.longestPop, now);
 
       return (
-        <div mix={[hudStyle, refuseDoubleTap()]}>
+        <div mix={[hudStyle, ...refuseDoubleTap()]}>
           <div mix={rowStyle}>
             <span mix={statStyle}>
               消去

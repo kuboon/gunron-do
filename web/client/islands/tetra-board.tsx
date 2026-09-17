@@ -175,7 +175,7 @@ export const TetraBoard = clientEntry(
               // And a double tap would otherwise offer to zoom in on it, which on a board whose
               // own double tap erases a cell is the browser reading the player's gesture as its
               // own. `refuseDoubleTap` is the whole of the answer.
-              refuseDoubleTap(),
+              ...refuseDoubleTap(),
             ]}
           >
             {game.cells.map((cell, index) => (
