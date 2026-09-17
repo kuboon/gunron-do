@@ -27,7 +27,7 @@ import { clientEntry, css, type Handle, on, ref } from "@remix-run/ui";
 import { animateEntrance, animateLayout } from "@remix-run/ui/animation";
 
 import { cellGlyph } from "./_lib/cell.tsx";
-import { refuseDoubleTap } from "./_lib/gestures.ts";
+import { refuseDoubleTap, refuseZoomGestures } from "./_lib/gestures.ts";
 import {
   type Burst,
   type BurstCell,
@@ -113,7 +113,14 @@ export const TetraBoard = clientEntry(
 
     function attach(node: Element | null): void {
       board = node as HTMLElement | null;
-      if (node === null || typeof ResizeObserver === "undefined") return;
+      if (node === null) return;
+
+      // The board is the one place on the page that has already given up scrolling, so it is the
+      // one place that can refuse a touch outright — and refusing it is what keeps a double tap
+      // the game's rather than the browser's.
+      refuseZoomGestures(node, handle.signal);
+
+      if (typeof ResizeObserver === "undefined") return;
 
       // The line is drawn in pixels, so it has to be told when the board stops being the size it
       // was — a phone turning on its side, or the two-column layout taking over.
