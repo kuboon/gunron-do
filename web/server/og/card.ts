@@ -1,49 +1,28 @@
 /**
- * The social card, drawn with Skia.
+ * The social card: what one looks like.
  *
  * A link to a page is a title, a line of description and nothing else until someone renders it —
- * so this draws the page's own words onto a 1200×630 canvas and hands back a PNG. It is the whole
- * of the drawing: what a card says is decided next door in `mod.ts`, and this only knows how to
- * put words on a rectangle.
+ * so this draws the page's own words onto a 1200×630 canvas and hands back a PNG. What a card
+ * says is decided next door in `mod.ts`; the glyphs come from `skia.ts`; and a page that has a
+ * picture worth showing hands one in as `art`, drawn by `art.ts`.
  *
- * `canvaskit-wasm` is Skia compiled to WebAssembly — the text stack a browser uses, minus the
- * browser. That matters for the part that is hard: a title is arbitrary length and the box is not,
- * so it has to be shaped, wrapped, and cut with an ellipsis at a line count. Skia's paragraph API
- * does that, and it does it with the same shaper the page itself will use.
+ * Two layouts, and the art decides which. Without it the words have the whole width, which is
+ * right for an article: a title is the only thing an article can show you. With it the words keep
+ * the left and the picture takes the right, because a game is a thing you look at rather than a
+ * thing you read about — and a game's card can then drop its description entirely and be better
+ * for it.
  *
  * The palette is the site's dark theme, copied from `client/static/app.css` — CSS custom
  * properties are resolved by a browser, and there is no browser here. Five values, restated,
- * rather than a stylesheet parser.
- *
- * The fonts come from `fonts/`, whatever is in it, and Skia falls back through them per glyph — so
- * a Japanese title is Japanese and the Latin around it is still Inter. A character nothing covers
- * is reported rather than silently drawn as a box; see `report` and `fonts/README.md`.
- *
- * Nothing here touches the network or the clock, so a card is a pure function of its text: the same
- * article builds the same bytes on every machine, which is what keeps a rebuild from churning the
- * deployed artifact.
+ * rather than a stylesheet parser. A card carrying art brings its own instead: a game's screen has
+ * its own colours, and a card that did not use them would be a card for a different game.
  */
 
-import CanvasKitModule, {
-  type CanvasKit,
-  type CanvasKitInitOptions,
-  type FontMgr,
-  type Paragraph,
-} from "canvaskit-wasm";
+import type { Canvas, Paragraph } from "canvaskit-wasm";
 
-/**
- * The loader, given the type its own package documents.
- *
- * `canvaskit-wasm` ships CommonJS with ES-module type declarations, and Deno resolves the default
- * import to the module rather than to the function inside it. The declarations are right about
- * what that function takes and returns; only where it sits is wrong, so this restates it rather
- * than describing it again.
- */
-const CanvasKitInit = CanvasKitModule as unknown as (
-  options?: CanvasKitInitOptions,
-) => Promise<CanvasKit>;
+import { paragraph, skia, type TextStyle } from "./skia.ts";
 
-/** What a card says. */
+/** What a card says, and what it shows. */
 export interface Card {
   /** The small line above the title — the site's name, or a section's. */
   eyebrow: string;
@@ -53,6 +32,51 @@ export interface Card {
   description?: string;
   /** The line along the bottom — where the page lives. */
   footer: string;
+  /** The picture on the right, for a page that has one. */
+  art?: Art;
+}
+
+/**
+ * A picture on a card.
+ *
+ * It is handed a box to fill and a pen to draw with, and it owns nothing: every paragraph the pen
+ * makes is tidied up by the card, so a drawing is only ever geometry and colour.
+ */
+export interface Art {
+  /** What to paint behind everything, when the picture wants the whole card to be its own. */
+  background?: string;
+  /** The bar across the top, in as many colours as it likes. */
+  bar?: readonly string[];
+  /** How the words should be coloured, for a card that is not on the site's own background. */
+  ink?: { eyebrow: string; title: string; muted: string; rule: string };
+  /** Draws the picture. */
+  draw(pen: Pen, box: Box): void;
+}
+
+/** A rectangle, in card pixels. */
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** What a picture draws with. */
+export interface Pen {
+  canvas: Canvas;
+  /** Skia itself, for paints, paths and matrices. */
+  ck: Awaited<ReturnType<typeof skia>>["ck"];
+  /**
+   * One run of text, laid out and ready to draw.
+   *
+   * The card keeps it and deletes it afterwards, so a drawing never has to.
+   *
+   * @param content The text
+   * @param style How to draw it
+   * @param width The measure to lay it out to
+   * @returns The paragraph
+   */
+  line(content: string, style: TextStyle, width: number): Paragraph;
 }
 
 /** The card's size. 1200×630 is what every social preview crops to. */
@@ -62,6 +86,8 @@ const HEIGHT = 630;
 const PADDING = 72;
 /** The blank line between the blocks of text. */
 const GAP = 26;
+/** How much of the width the words keep when a picture has the rest. */
+const WORDS = 0.48;
 
 /**
  * How each block is drawn.
@@ -94,25 +120,14 @@ const color = {
   border: "#1f2937",
 } as const;
 
-/** Where the fonts are: a directory, so adding one is dropping a file in. See `loadFonts`. */
-const fontsDir = new URL("fonts/", import.meta.url);
-
-/**
- * Skia, and the fonts to draw with — started once, on the first card.
- *
- * Lazy because `deno serve` should not pay for a WebAssembly runtime it may never use, and shared
- * because the build asks for one card per page and there is no reason to load Skia twice.
- */
-let started: Promise<{ ck: CanvasKit; fonts: FontMgr; families: string[] }>;
-
 /**
  * Draws a card.
  *
- * @param card The words to put on it
+ * @param card The words to put on it, and the picture if it has one
  * @returns The PNG bytes, ready to serve
  */
 export async function renderCard(card: Card): Promise<Uint8Array<ArrayBuffer>> {
-  const { ck, fonts, families } = await (started ??= start());
+  const { ck, fonts } = await skia();
 
   const surface = ck.MakeSurface(WIDTH, HEIGHT);
   if (surface === null) {
@@ -121,80 +136,109 @@ export async function renderCard(card: Card): Promise<Uint8Array<ArrayBuffer>> {
 
   try {
     const canvas = surface.getCanvas();
-    canvas.clear(ck.parseColorString(color.bg));
+    const art = card.art;
+    const ink = art?.ink ?? {
+      eyebrow: color.accent,
+      title: color.fg,
+      muted: color.muted,
+      rule: color.border,
+    };
 
-    // The accent bar across the top: the one piece of the site's identity that is not a word.
-    const accent = new ck.Paint();
-    accent.setColor(ck.parseColorString(color.accent));
-    canvas.drawRect(ck.LTRBRect(0, 0, WIDTH, 10), accent);
-    accent.delete();
+    canvas.clear(ck.parseColorString(art?.background ?? color.bg));
 
     const paragraphs: Paragraph[] = [];
     /** Characters no registered font had a glyph for. See `report`. */
     const missing = new Set<number>();
 
-    /** Lays a paragraph out to the content width, which is when Skia resolves its glyphs. */
-    const lay = (paragraph: Paragraph): Paragraph => {
-      paragraphs.push(paragraph);
-      paragraph.layout(WIDTH - PADDING * 2);
-      paragraph.unresolvedCodepoints().forEach((code) => missing.add(code));
-      return paragraph;
+    /** Lays a paragraph out to a measure, which is when Skia resolves its glyphs. */
+    const line = (
+      content: string,
+      style: TextStyle,
+      width: number,
+    ): Paragraph => {
+      const laid = paragraph(ck, fonts, content, style);
+      paragraphs.push(laid);
+      laid.layout(width);
+      laid.unresolvedCodepoints().forEach((code) => missing.add(code));
+      return laid;
     };
 
-    /** Lays a paragraph out and draws it, returning the next free baseline. */
-    const draw = (paragraph: Paragraph, top: number, gap = 0): number => {
-      canvas.drawParagraph(lay(paragraph), PADDING, top);
-      return top + paragraph.getHeight() + gap;
-    };
+    // The bar across the top: the one piece of identity on the card that is not a word. One
+    // colour for the site, and as many as a game's own palette has.
+    bar(ck, canvas, art?.bar ?? [color.accent]);
 
-    let top = PADDING;
-    top = draw(
-      text(ck, fonts, families, card.eyebrow, {
-        ...type.eyebrow,
-        color: color.accent,
-        bold: true,
-      }),
-      top,
-      GAP,
-    );
-    top = draw(
-      text(ck, fonts, families, card.title, {
-        ...type.title,
-        color: color.fg,
-        bold: true,
-      }),
-      top,
-      GAP,
-    );
-    if (card.description) {
-      draw(
-        text(ck, fonts, families, card.description, {
-          ...type.description,
-          color: color.muted,
-        }),
-        top,
-      );
+    // The picture first, so a word that reaches into it is drawn over it rather than under.
+    if (art !== undefined) {
+      art.draw({ canvas, ck, line }, {
+        x: WIDTH * WORDS,
+        y: 0,
+        width: WIDTH * (1 - WORDS),
+        height: HEIGHT,
+      });
     }
 
+    const measure = (art === undefined ? WIDTH : WIDTH * WORDS) - PADDING * 2;
+
+    // A card with a picture and no description has nothing below the title to balance it against,
+    // so the title takes the room the description would have had.
+    const big = art !== undefined && card.description === undefined;
+
+    const eyebrow = line(card.eyebrow, {
+      ...type.eyebrow,
+      color: ink.eyebrow,
+      bold: true,
+    }, measure);
+    const title = line(card.title, {
+      ...type.title,
+      size: type.title.size * (big ? 1.5 : 1),
+      maxLines: big ? 2 : type.title.maxLines,
+      color: ink.title,
+      bold: true,
+    }, measure);
+    const description = card.description === undefined ? null : line(
+      card.description,
+      { ...type.description, color: ink.muted },
+      measure,
+    );
     // The footer is measured from the bottom rather than from whatever came before it, so a card
     // with a one-line title and one with three both end at the same place.
-    const footer = text(ck, fonts, families, card.footer, {
-      ...type.footer,
-      color: color.muted,
-    });
-    lay(footer);
+    const footer = line(
+      card.footer,
+      { ...type.footer, color: ink.muted },
+      measure,
+    );
+
     const footerTop = HEIGHT - PADDING - footer.getHeight();
+    const ruleTop = footerTop - 32;
+
+    // Where the words start. At the top for a card that is all words — a title is the first thing
+    // to read and should be where reading starts. Centred against the picture for a card that has
+    // one, because two short lines pinned to the top of a tall column read as a mistake.
+    let top = PADDING;
+    if (big) {
+      const block = eyebrow.getHeight() + GAP + title.getHeight();
+      top = PADDING + (ruleTop - PADDING - block) / 2;
+    }
+
+    const draw = (laid: Paragraph, at: number, gap = 0): number => {
+      canvas.drawParagraph(laid, PADDING, at);
+      return at + laid.getHeight() + gap;
+    };
+
+    top = draw(eyebrow, top, GAP);
+    top = draw(title, top, GAP);
+    if (description !== null) draw(description, top);
 
     const rule = new ck.Paint();
-    rule.setColor(ck.parseColorString(color.border));
+    rule.setColor(ck.parseColorString(ink.rule));
     canvas.drawRect(
-      ck.LTRBRect(PADDING, footerTop - 32, WIDTH - PADDING, footerTop - 31),
+      ck.LTRBRect(PADDING, ruleTop, PADDING + measure, ruleTop + 1),
       rule,
     );
     rule.delete();
 
     canvas.drawParagraph(footer, PADDING, footerTop);
-    paragraphs.forEach((paragraph) => paragraph.delete());
+    paragraphs.forEach((laid) => laid.delete());
     report(missing, card);
 
     const image = surface.makeImageSnapshot();
@@ -215,6 +259,21 @@ export async function renderCard(card: Card): Promise<Uint8Array<ArrayBuffer>> {
     // site.
     surface.delete();
   }
+}
+
+/** The bar across the top, split evenly between however many colours it is given. */
+function bar(
+  ck: Awaited<ReturnType<typeof skia>>["ck"],
+  canvas: Canvas,
+  colors: readonly string[],
+): void {
+  const paint = new ck.Paint();
+  const step = WIDTH / colors.length;
+  colors.forEach((each, i) => {
+    paint.setColor(ck.parseColorString(each));
+    canvas.drawRect(ck.LTRBRect(step * i, 0, step * (i + 1), 10), paint);
+  });
+  paint.delete();
 }
 
 /**
@@ -238,108 +297,4 @@ function report(missing: Set<number>, card: Card): void {
   console.warn(
     `og: no glyph for ${characters} in ${card.footer} — see server/og/fonts/README.md`,
   );
-}
-
-/** How one run of text is drawn. */
-interface TextStyle {
-  size: number;
-  color: string;
-  bold?: boolean;
-  /** Lines past this are dropped and the last one ends in an ellipsis. */
-  maxLines: number;
-  /** Line height as a multiple of the font size. */
-  height?: number;
-  letterSpacing?: number;
-}
-
-/**
- * One paragraph, shaped but not yet laid out.
- *
- * @param ck Skia
- * @param fonts The fonts registered from `fonts/`
- * @param families Their family names, in fallback order
- * @param content The text to shape
- * @param style How to draw it
- * @returns The paragraph, for the caller to lay out and draw
- */
-function text(
-  ck: CanvasKit,
-  fonts: FontMgr,
-  families: string[],
-  content: string,
-  style: TextStyle,
-): Paragraph {
-  const paragraphStyle = new ck.ParagraphStyle({
-    textStyle: {
-      color: ck.parseColorString(style.color),
-      fontFamilies: families,
-      fontSize: style.size,
-      fontStyle: {
-        weight: style.bold ? ck.FontWeight.Bold : ck.FontWeight.Normal,
-      },
-      letterSpacing: style.letterSpacing,
-      heightMultiplier: style.height,
-    },
-    textAlign: ck.TextAlign.Left,
-    maxLines: style.maxLines,
-    ellipsis: "…",
-  });
-
-  const builder = ck.ParagraphBuilder.Make(paragraphStyle, fonts);
-  try {
-    builder.addText(content);
-    return builder.build();
-  } finally {
-    builder.delete();
-  }
-}
-
-/** Starts Skia and registers the fonts. */
-async function start(): Promise<
-  { ck: CanvasKit; fonts: FontMgr; families: string[] }
-> {
-  const ck = await CanvasKitInit();
-  const files = await loadFonts();
-
-  const fonts = ck.FontMgr.FromData(...files);
-  if (fonts === null) throw new Error(`No usable font in ${fontsDir}`);
-
-  const families = Array.from(
-    { length: fonts.countFamilies() },
-    (_, i) => fonts.getFamilyName(i),
-  );
-
-  return { ck, fonts, families };
-}
-
-/**
- * Every font in `fonts/`, in name order.
- *
- * A directory rather than a list, for the same reason the islands are globbed: a font file being
- * there is the decision, and naming it again here would only be a second place to keep it.
- *
- * Skia falls back per glyph through the families in the order they are registered, so the names
- * decide which font draws a character two of them have: Inter sorts first and keeps the Latin,
- * Noto Sans JP follows and answers for the Japanese. Covering another script is dropping a file in
- * here, and `report` names the characters that nothing covered yet. See `fonts/README.md`.
- *
- * @returns The font files, sorted by name
- */
-async function loadFonts(): Promise<ArrayBuffer[]> {
-  const names: string[] = [];
-  for await (const entry of Deno.readDir(fontsDir)) {
-    if (entry.isFile && /\.(?:ttf|otf)$/i.test(entry.name)) {
-      names.push(entry.name);
-    }
-  }
-  names.sort();
-
-  if (names.length === 0) throw new Error(`No font files in ${fontsDir}`);
-
-  return await Promise.all(names.map(async (name) => {
-    // Skia takes the buffer rather than a view over it, and a view need not cover the whole of
-    // one — so the bytes are copied into a buffer that is exactly the font and nothing else.
-    const bytes = await Deno.readFile(new URL(name, fontsDir));
-    return bytes.slice().buffer;
-  }));
 }

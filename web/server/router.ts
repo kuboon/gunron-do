@@ -61,6 +61,10 @@ interface Page {
   chrome?: "site" | "bare";
   /** What a `bare` page paints the document, so an overscroll shows its colour and not the site's. */
   background?: string;
+  /** Set by a page whose social card carries a picture — the name of one in `og/art.ts`. */
+  art?: string;
+  /** Set by a page whose card wants a shorter title than its `<title>`. */
+  ogTitle?: string;
 }
 
 /**
