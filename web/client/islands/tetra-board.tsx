@@ -26,6 +26,7 @@
 import { clientEntry, css, type Handle, on, ref } from "@remix-run/ui";
 import { animateEntrance, animateLayout } from "@remix-run/ui/animation";
 
+import { cellGlyph } from "./_lib/cell.tsx";
 import {
   type Burst,
   type BurstCell,
@@ -34,13 +35,7 @@ import {
   WIDTH,
 } from "../games/tetra-do/game.ts";
 import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
-import {
-  freeReduction,
-  type Op,
-  opBase,
-  opDirection,
-  opLabel,
-} from "../games/tetra-do/rotation.ts";
+import { freeReduction, opBase } from "../games/tetra-do/rotation.ts";
 
 /**
  * The board's own measurements, in pixels.
@@ -54,19 +49,6 @@ const CELL_GAP = 6;
 
 /** How far from a cell's centre still counts as that cell, as a fraction of its size. */
 const CELL_REACH = 0.42;
-
-/**
- * Where each letter's mark sits in the cell's triangle: `a` bottom right, `b` bottom left, `c`
- * top.
- *
- * The triangle is the `e` face seen from the front, and these are where its three corners draw
- * on screen — so a cell's mark and the same corner of the solid above it are in the same place.
- */
-const MARK_POSITIONS: readonly (readonly [number, number])[] = [
-  [86, 77],
-  [14, 77],
-  [50, 15],
-];
 
 export const TetraBoard = clientEntry(
   import.meta.url,
@@ -210,7 +192,7 @@ export const TetraBoard = clientEntry(
                     cancelled,
                   )}
                 >
-                  {glyph(cell.op)}
+                  {cellGlyph(cell.op)}
                 </div>
               </div>
             ))}
@@ -334,56 +316,6 @@ function sparks(
 
 /** How many sparks a cleared cell throws, by how much the clear was worth. */
 const SPARKS = { medium: 10, large: 16 } as const;
-
-/**
- * One cell's face: the floor triangle, with the corner this move turns about marked.
- *
- * Filled for a clockwise turn, hollow for its inverse — the same distinction the letter makes,
- * said twice, because at a glance the mark is what a player reads and the letter is what they
- * check.
- */
-function glyph(op: Op) {
-  const base = opBase(op);
-  const color = OP_COLORS[base];
-  const inverse = opDirection(op) < 0;
-  const [markX, markY] = MARK_POSITIONS[base];
-
-  return (
-    <svg
-      viewBox="0 0 100 100"
-      mix={glyphStyle}
-      role="img"
-      aria-label={opLabel(op)}
-    >
-      <polygon
-        points="50,15 14,77 86,77"
-        fill="none"
-        stroke={color}
-        stroke-width="3.5"
-        stroke-linejoin="round"
-        opacity=".8"
-      />
-      <circle
-        cx={markX}
-        cy={markY}
-        r="10"
-        fill={inverse ? surface.cell : color}
-        stroke={color}
-        stroke-width="4"
-      />
-      <text
-        x="50"
-        y="63"
-        text-anchor="middle"
-        font-size={inverse ? 22 : 26}
-        font-weight="bold"
-        fill={color}
-      >
-        {opLabel(op)}
-      </text>
-    </svg>
-  );
-}
 
 /**
  * A cell's face: on its way out, traced, traced-but-cancelled, or none of those.
@@ -516,8 +448,6 @@ const facePoppingStyle = css({
   transform: "scale(0.2)",
   opacity: 0,
 });
-
-const glyphStyle = css({ display: "block", width: "100%", height: "100%" });
 
 /**
  * A spark: out along its own direction, shrinking, and gone.

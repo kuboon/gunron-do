@@ -37,6 +37,7 @@ import {
   todayInTokyo,
 } from "../games/tetra-do/session.ts";
 import { sound } from "../games/tetra-do/sound.ts";
+import { tutorial } from "../games/tetra-do/tutorial.ts";
 
 /** How far the recording in the URL has got. */
 type Recording =
@@ -180,6 +181,15 @@ export const TetraControls = clientEntry(
                   ]}
                 >
                   {session.date} の盤面で始める
+                </button>
+                <button
+                  type="button"
+                  mix={[
+                    secondaryStyle,
+                    on<HTMLButtonElement>("click", () => tutorial.show()),
+                  ]}
+                >
+                  遊び方をくわしく
                 </button>
                 {recording.state === "bad"
                   ? (
