@@ -7,10 +7,10 @@
  * picture worth showing hands one in as `art`, drawn by `art.ts`.
  *
  * Two layouts, and the art decides which. Without it the words have the whole width, which is
- * right for an article: a title is the only thing an article can show you. With it the words keep
- * the left and the picture takes the right, because a game is a thing you look at rather than a
- * thing you read about — and a game's card can then drop its description entirely and be better
- * for it.
+ * right for an article: a title is the only thing an article can show you, so it gets the measure,
+ * a description under it, and its address along the bottom. With it the words keep the left and
+ * the picture takes the right, because a game is a thing you look at rather than a thing you read
+ * about — and the card can then drop the description and the address too, and be better for it.
  *
  * The palette is the site's dark theme, copied from `client/static/app.css` — CSS custom
  * properties are resolved by a browser, and there is no browser here. Five values, restated,
@@ -200,16 +200,20 @@ export async function renderCard(card: Card): Promise<Uint8Array<ArrayBuffer>> {
       { ...type.description, color: ink.muted },
       measure,
     );
-    // The footer is measured from the bottom rather than from whatever came before it, so a card
-    // with a one-line title and one with three both end at the same place.
-    const footer = line(
-      card.footer,
-      { ...type.footer, color: ink.muted },
-      measure,
-    );
 
-    const footerTop = HEIGHT - PADDING - footer.getHeight();
-    const ruleTop = footerTop - 32;
+    // Where the page lives, along the bottom, under a rule. A card is read away from the site and
+    // where it came from is the one thing its own words never say — but a card with a picture is
+    // already unmistakably from somewhere, and the line would only be a URL in a small grey font
+    // taking the place of the air the picture wants. So an article gets one and a game does not.
+    //
+    // Measured from the bottom rather than from whatever came before it, so a card with a
+    // one-line title and one with three both end at the same place.
+    const footer = art === undefined
+      ? line(card.footer, { ...type.footer, color: ink.muted }, measure)
+      : null;
+    const bottom = footer === null
+      ? HEIGHT - PADDING
+      : HEIGHT - PADDING - footer.getHeight() - 32;
 
     // Where the words start. At the top for a card that is all words — a title is the first thing
     // to read and should be where reading starts. Centred against the picture for a card that has
@@ -217,7 +221,7 @@ export async function renderCard(card: Card): Promise<Uint8Array<ArrayBuffer>> {
     let top = PADDING;
     if (big) {
       const block = eyebrow.getHeight() + GAP + title.getHeight();
-      top = PADDING + (ruleTop - PADDING - block) / 2;
+      top = PADDING + (bottom - PADDING - block) / 2;
     }
 
     const draw = (laid: Paragraph, at: number, gap = 0): number => {
@@ -229,15 +233,17 @@ export async function renderCard(card: Card): Promise<Uint8Array<ArrayBuffer>> {
     top = draw(title, top, GAP);
     if (description !== null) draw(description, top);
 
-    const rule = new ck.Paint();
-    rule.setColor(ck.parseColorString(ink.rule));
-    canvas.drawRect(
-      ck.LTRBRect(PADDING, ruleTop, PADDING + measure, ruleTop + 1),
-      rule,
-    );
-    rule.delete();
+    if (footer !== null) {
+      const rule = new ck.Paint();
+      rule.setColor(ck.parseColorString(ink.rule));
+      canvas.drawRect(
+        ck.LTRBRect(PADDING, bottom, PADDING + measure, bottom + 1),
+        rule,
+      );
+      rule.delete();
+      canvas.drawParagraph(footer, PADDING, bottom + 32);
+    }
 
-    canvas.drawParagraph(footer, PADDING, footerTop);
     paragraphs.forEach((laid) => laid.delete());
     report(missing, card);
 
