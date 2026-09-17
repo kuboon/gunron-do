@@ -27,6 +27,7 @@
 import { stripBase } from "@remix-kbn/ssg/site";
 
 import { base } from "../../client/base.ts";
+import { ART } from "./art.ts";
 import { type Card, renderCard } from "./card.ts";
 
 /** The eyebrow every card carries unless a page asks for its own. */
@@ -35,9 +36,24 @@ const SITE_NAME = "gunron-do";
 /** What a page tells its card — the two things every page module already exports. */
 export interface OgPage {
   title: string;
+  /**
+   * The title for the card, when the page's own is longer than a card needs.
+   *
+   * A `<title>` has to say where it is — a tab and a search result are read out of context — and a
+   * card has an eyebrow and, sometimes, a picture doing that job already.
+   */
+  ogTitle?: string;
   description?: string;
   /** The small line above the title. Defaults to the site's name. */
   eyebrow?: string;
+  /**
+   * The picture this page's card carries, by name — a key of `ART`.
+   *
+   * A name rather than the drawing itself, because a page module is rendered into HTML and has no
+   * business importing a WebAssembly text shaper. The string is all that crosses the line; what
+   * it means is `art.ts`.
+   */
+  art?: string;
 }
 
 /**
@@ -124,11 +140,18 @@ function toCard(path: string, page: OgPage): Card {
   const pagePath = path.replace(/^\/og\//, "/").replace(/(?:index)?\.png$/, "");
   const location = `${base}${pagePath}`;
 
+  const art = page.art === undefined ? undefined : ART[page.art];
+  if (page.art !== undefined && art === undefined) {
+    throw new Error(`No card art named "${page.art}" — see server/og/art.ts`);
+  }
+
   return {
     eyebrow: page.eyebrow ?? SITE_NAME,
-    title: page.title,
-    description: page.description,
+    title: page.ogTitle ?? page.title,
+    // A card with a picture says what it is by showing it, so the words stay out of the way.
+    description: art === undefined ? page.description : undefined,
     footer: siteUrl ? `${siteUrl.host}${location}` : location,
+    art,
   };
 }
 

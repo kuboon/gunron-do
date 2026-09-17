@@ -32,7 +32,18 @@ import { routes } from "../routes.ts";
 
 const game = findGame("tetra-do")!;
 
+/**
+ * Just the game's name on the card, with `gunron-do` as the eyebrow above it.
+ *
+ * The `<title>` still carries both — a browser tab and a search result need to say where they
+ * are — but a card has a picture doing that job, and a title that says the site's name twice is
+ * a title with half its room wasted.
+ */
 export const title = `${game.title} — gunron-do`;
+export const ogTitle: string = game.title;
+
+/** The card is the game: the solid with its `e` lit, and the trace that got it there. */
+export const art = "tetra-do";
 export const description = game.description;
 
 /** Islands, so the runtime boots. */
