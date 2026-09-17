@@ -10,6 +10,10 @@
  * meant to say *today* and would go stale the moment it was read. A day in the URL is now only
  * ever a day somebody meant: a board being talked about, or a round being replayed.
  *
+ * `?date=` and something that is not a day is the one thing that does get tidied, because it is
+ * the one thing that cannot be meant. It is taken out — not corrected to today, which would put a
+ * date back in the address that nobody asked for.
+ *
  * Today is Tokyo's today, wherever the player is. A board that changed at the reader's local
  * midnight would be a different board for two people talking about it, which is the one thing a
  * daily puzzle cannot be. Japan has no daylight saving, so "Tokyo" is nine hours and no table.
@@ -102,18 +106,35 @@ export function shareUrl(date: string, rec: string): string {
 /**
  * What this page is, from its URL.
  *
- * Nothing here navigates. A missing day is today's, and so is a day that is not one — a board is
- * the only thing this page can be, and being handed today's while the address bar still shows what
- * was typed is more use to whoever typed it than a silent correction that loses what they tried.
+ * A missing day is today's, and the address is left exactly as it was. A day that is not a day —
+ * `?date=2026-02-31`, which has the shape and is not a date — is today's too, and that one word
+ * comes out of the address, because a board is the only thing this page can be and `2026-02-31` is
+ * not naming one.
+ *
+ * Taken out rather than replaced with today: correcting it would put a date back in an address
+ * nobody asked for, which is the thing this stopped doing. And taken out with `replaceState`
+ * rather than a navigation, so the page it is already loading is the page that runs, and the back
+ * button still goes where the player came from.
+ *
+ * Runs in a browser only — `readSession`'s caller checks for one first.
  *
  * @returns The session this URL describes
  */
 export function readSession(): Session {
-  const params = new URLSearchParams(globalThis.location.search);
-  const date = params.get("date");
+  const url = new URL(globalThis.location.href);
+  const date = url.searchParams.get("date");
+
+  if (date !== null && !isDate(date)) {
+    url.searchParams.delete("date");
+    globalThis.history.replaceState(
+      null,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }
 
   return {
     date: date !== null && isDate(date) ? date : todayInTokyo(),
-    rec: params.get("rec"),
+    rec: url.searchParams.get("rec"),
   };
 }
