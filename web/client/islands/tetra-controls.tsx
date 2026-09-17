@@ -172,7 +172,7 @@ export const TetraControls = clientEntry(
                   </li>
                   <li>
                     <code>a</code> <code>a⁻¹</code>{" "}
-                    のように打ち消し合う2マスも消える。
+                    のように打ち消し合うマスも消えるが、数には入らない。
                   </li>
                   <li>ダブルタップで1マスだけ消せる。</li>
                 </ul>

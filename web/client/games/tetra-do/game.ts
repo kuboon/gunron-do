@@ -160,15 +160,6 @@ const HIT_STOP_MS = { medium: 60, large: 110 } as const;
 /** A trace long enough to be worth the full treatment. */
 const LARGE_CLEAR = 5;
 
-/**
- * From this many cells up, a trace that leans on cancellations is not counted.
- *
- * A cancelling pair is two cells that undo each other, so a long trace can be padded with them:
- * the same short answer, walked the long way round. It still clears — it did come home — but the
- * cells it took off the board are not added up and it cannot be the longest.
- */
-const PADDING_LIMIT = 5;
-
 /** Two taps on one cell within this long are one gesture: erase it. */
 const DOUBLE_TAP_MS = 320;
 
@@ -590,20 +581,18 @@ export class TetraDo {
       return;
     }
 
-    const home = isIdentity(compose(word));
     const reduced = reducedLength(word);
 
-    if (home && reduced >= MIN_REDUCED_LENGTH) {
-      // A long trace padded with cancelling pairs clears like any other, and counts as one that
-      // came home — but the cells and the length it borrowed from the padding are not credited.
-      this.#solve(word.length >= PADDING_LIMIT && reduced < word.length);
+    // Nothing but cancellations: `a a⁻¹`, or several such pairs in a row. It comes home because
+    // it never went anywhere, so it is not an answer and counts as nothing — but it is allowed
+    // to take those cells off the board.
+    if (reduced === 0) {
+      this.#undo();
       return;
     }
 
-    // Two cells that undo each other. It is not an answer — there is no rotation in it to speak
-    // of — so it does not count as one, but it is allowed to take the pair off the board.
-    if (home && word.length === 2) {
-      this.#undo();
+    if (isIdentity(compose(word)) && reduced >= MIN_REDUCED_LENGTH) {
+      this.#solve(reduced);
       return;
     }
 
@@ -652,23 +641,23 @@ export class TetraDo {
   /**
    * A trace that came home.
    *
-   * @param padded Whether it leaned on cancellations to reach its length, in which case the
-   * cells and the length are not credited — only that it came home at all
+   * What it counts for is its reduced length: the cancelling pairs inside it did nothing, so
+   * they add nothing. Padding a trace with `a a⁻¹` walks the same answer the long way round,
+   * and the long way round is worth what the short way was.
+   *
+   * @param reduced The trace's length with the cancellations taken out
    */
-  #solve(padded: boolean): void {
-    const cells = this.#path.length;
-    const tier = cells >= LARGE_CLEAR ? "large" : "medium";
+  #solve(reduced: number): void {
+    const tier = reduced >= LARGE_CLEAR ? "large" : "medium";
+    const record = reduced > this.#longest;
 
     this.#solved += 1;
-    if (!padded) {
-      const record = cells > this.#longest;
-      this.#cleared += cells;
-      this.#longest = Math.max(this.#longest, cells);
-      this.#clearedPop = this.#pop(`+${cells}`);
-      // An arrow rather than the bare number: beside a number that already says `6`, a floating
-      // `6` reads as a second count rather than as the one that just moved.
-      if (record) this.#longestPop = this.#pop(`↑${cells}`);
-    }
+    this.#cleared += reduced;
+    this.#longest = Math.max(this.#longest, reduced);
+    this.#clearedPop = this.#pop(`+${reduced}`);
+    // An arrow rather than the bare number: beside a number that already says `6`, a floating
+    // `6` reads as a second count rather than as the one that just moved.
+    if (record) this.#longestPop = this.#pop(`↑${reduced}`);
     this.#queue.push({ kind: "flash" });
 
     this.#burst = {
@@ -681,7 +670,7 @@ export class TetraDo {
     };
     this.#knock(tier);
     this.#hitStop = HIT_STOP_MS[tier];
-    sound.clear(reducedLength(this.word));
+    sound.clear(reduced);
 
     this.#take(this.#path);
     this.#path = [];
@@ -696,10 +685,13 @@ export class TetraDo {
     }, BURST_MS);
   }
 
-  /** Two cells that undo each other, taken off the board without ceremony. */
+  /**
+   * Cells that undo each other, taken off the board without ceremony.
+   *
+   * It counts for nothing — not the cells, not a trace that came home. The pair was never worth
+   * anything; being allowed to clear it is the whole of what it gets.
+   */
   #undo(): void {
-    this.#cleared += this.#path.length;
-    this.#clearedPop = this.#pop(`+${this.#path.length}`);
     sound.clear(2);
     this.#take(this.#path);
     this.#path = [];
