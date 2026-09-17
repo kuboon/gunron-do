@@ -1,28 +1,90 @@
 /**
- * Whether the walkthrough is up, and whether it is wanted at all.
+ * The walkthrough: three things to do on the real board, in order.
  *
- * A store rather than state inside the island, for one reason: two islands need it. The
- * walkthrough itself draws it, and the "how to play" card underneath carries the button that asks
- * for it again — which matters, because "do not show this again" is otherwise a door that locks
- * behind you.
+ * It was five pages of prose once, and prose turned out to be the wrong medium for it. Nothing
+ * written down conveys *the solid turns as your finger moves and the path vanishes when it comes
+ * home* — you have to watch it happen under your own hand. So the lesson is the board: the real
+ * one, with the real rules, minus the clock.
  *
- * The preference lives in `localStorage`, read once and lazily. Lazily because this module is
- * imported by islands that also render on the server, where there is no storage to read and
- * nothing to decide yet.
+ * A step points at some cells and waits for them to be gone. That one test covers all three
+ * lessons — a path that comes home, a pair that cancels, a cell tapped twice — because all three
+ * end the same way, with the cells the player was pointed at no longer there. Nothing here has to
+ * know *how* they went, which is what keeps this file from being a second copy of the rules.
+ *
+ * The preference lives in `localStorage`, read once and lazily: this module is imported by islands
+ * that also render on the server, where there is no storage to read and nothing to decide yet.
  */
+
+import { game } from "./game.ts";
+import { findClearing, findPair, findSpare } from "./hint.ts";
 
 /** Where the preference is kept between visits. */
 const STORAGE_KEY = "tetra-do:tutorial";
 
+/** What a step asks for, and what to say while it is being asked. */
+export interface Step {
+  /** The instruction, before the player has done it. */
+  ask: string;
+  /** What to say once they have. */
+  done: string;
+}
+
+const STEPS: readonly Step[] = [
+  {
+    ask: "光ったマスを順になぞってみよう。指を動かすとテトラが回ります。",
+    done: "テトラが元の向きに戻ったので、なぞった道が消えました。",
+  },
+  {
+    ask: "この2マスは打ち消し合います。なぞってみよう。",
+    done: "消えますが、回転としては何もしていないのでスコアにはなりません。",
+  },
+  {
+    ask: "邪魔なマスはダブルタップ。光ったマスを2回叩いてみよう。",
+    done: "1マスだけ消えました。これは何にも数えません。",
+  },
+];
+
+/** How long the "you did it" line stays up before the next thing to do. */
+const BEAT_MS = 1400;
+
 class Tutorial {
-  #open = false;
+  #running = false;
+  /** Which step, or `STEPS.length` once they are all done. */
+  #at = 0;
+  /** The cell ids the current step is waiting to see the back of. */
+  #awaiting: number[] = [];
+  /** Set between doing a step and being given the next one. */
+  #cheering = false;
   /** `null` until the preference has been read, so the read happens in a browser. */
   #dismissed: boolean | null = null;
   #listeners = new Set<() => void>();
+  #watching: (() => void) | null = null;
 
-  /** Whether the walkthrough is on screen. */
-  get open(): boolean {
-    return this.#open;
+  /** Whether the walkthrough has the board. */
+  get running(): boolean {
+    return this.#running;
+  }
+
+  /** What to say right now, or `null` when there is nothing to say. */
+  get says(): string | null {
+    if (!this.#running) return null;
+    if (this.#at >= STEPS.length) return "これで遊べます。";
+    return this.#cheering ? STEPS[this.#at].done : STEPS[this.#at].ask;
+  }
+
+  /** Whether every step is done, so the only thing left is to start. */
+  get finished(): boolean {
+    return this.#running && this.#at >= STEPS.length;
+  }
+
+  /** Which step is being worked on, for a row of dots. */
+  get at(): number {
+    return Math.min(this.#at, STEPS.length);
+  }
+
+  /** How many steps there are. */
+  get length(): number {
+    return STEPS.length;
   }
 
   /**
@@ -42,17 +104,32 @@ class Tutorial {
     return this.#dismissed;
   }
 
-  /** Puts it on screen. */
-  show(): void {
-    if (this.#open) return;
-    this.#open = true;
+  /** Takes the board and asks for the first thing. */
+  start(): void {
+    if (this.#running) return;
+    this.#running = true;
+    this.#at = 0;
+    this.#cheering = false;
+    game.teach();
+    this.#watching ??= game.subscribe(() => this.#check());
+    this.#ask();
     this.#emit();
   }
 
-  /** Takes it away, leaving whatever was under it. */
-  close(): void {
-    if (!this.#open) return;
-    this.#open = false;
+  /**
+   * Gives the board back, done or not.
+   *
+   * The board is dealt again on the way out: a lesson leaves holes in it, and the round that
+   * follows should be the day's board rather than the day's board minus the practice.
+   */
+  stop(): void {
+    if (!this.#running) return;
+    this.#running = false;
+    this.#awaiting = [];
+    this.#watching?.();
+    this.#watching = null;
+    game.setHint([]);
+    game.preview(game.date);
     this.#emit();
   }
 
@@ -80,6 +157,47 @@ class Tutorial {
     return () => {
       this.#listeners.delete(listener);
     };
+  }
+
+  /** Points at whatever this step is about, on the board as it stands now. */
+  #ask(): void {
+    const ops = game.cells.map((cell) => cell.op);
+    const cells = this.#at === 0
+      ? findClearing(ops)
+      : this.#at === 1
+      ? findPair(ops)
+      : [findSpare(ops, [])];
+
+    // A board with nothing of this kind on it — rare, and not worth stalling the lesson over.
+    if (cells === null) {
+      this.#at += 1;
+      if (this.#at < STEPS.length) this.#ask();
+      else game.setHint([]);
+      return;
+    }
+
+    this.#awaiting = cells.map((index) => game.cells[index].id);
+    game.setHint(cells);
+  }
+
+  /** The step is done when the cells it pointed at are gone, however they went. */
+  #check(): void {
+    if (!this.#running || this.#cheering || this.#awaiting.length === 0) return;
+    const there = new Set(game.cells.map((cell) => cell.id));
+    if (this.#awaiting.some((id) => there.has(id))) return;
+
+    this.#awaiting = [];
+    this.#cheering = true;
+    game.setHint([]);
+    this.#emit();
+
+    setTimeout(() => {
+      if (!this.#running) return;
+      this.#cheering = false;
+      this.#at += 1;
+      if (this.#at < STEPS.length) this.#ask();
+      this.#emit();
+    }, BEAT_MS);
   }
 
   #emit(): void {

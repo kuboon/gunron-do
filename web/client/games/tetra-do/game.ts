@@ -79,9 +79,10 @@ export const URGENT_MS = 10_000;
  * Where the round is in its life, which is also which overlay is up.
  *
  * `counting` is the three seconds before the clock starts: the board is on screen and readable,
- * and nothing it does counts yet.
+ * and nothing it does counts yet. `teaching` is the walkthrough: the board is real and answers to
+ * a finger exactly as it will in a round, but the clock is not running and nothing is at stake.
  */
-export type Phase = "ready" | "counting" | "playing" | "over";
+export type Phase = "ready" | "teaching" | "counting" | "playing" | "over";
 
 /**
  * A number that just moved, for the HUD to make a fuss about.
@@ -241,6 +242,8 @@ export class TetraDo {
   #longestPop: Pop | null = null;
   /** The last single-cell tap, for spotting the second one. */
   #lastTap: { index: number; at: number } | null = null;
+  /** Cells the walkthrough is pointing at, for the board to ring. */
+  #hint: readonly number[] = [];
   #popId = 0;
   #burst: Burst | null = null;
   #shake: Shake | null = null;
@@ -328,6 +331,10 @@ export class TetraDo {
         this.#phase = "playing";
         this.#emit();
       }
+      this.#advance(dt);
+    } else if (this.#phase === "teaching") {
+      // Everything the board does, none of what the clock does. A lesson cannot run out.
+      this.#settle(dt);
       this.#advance(dt);
     } else if (this.#phase === "playing") {
       this.#settle(dt);
@@ -448,6 +455,10 @@ export class TetraDo {
   get paused(): boolean {
     return this.#paused;
   }
+  /** The cells the walkthrough is asking for, which the board rings. Empty the rest of the time. */
+  get hint(): readonly number[] {
+    return this.#hint;
+  }
   /** Everything the player did this round, in order. */
   get moves(): readonly Move[] {
     return this.#moves;
@@ -512,6 +523,28 @@ export class TetraDo {
     this.#emit();
   }
 
+  /**
+   * Hands over the board to be practised on: real cells, real rules, no clock.
+   *
+   * The same board the player is about to be given, because the lesson is the game rather than a
+   * picture of it. Whatever they do to it here is undone when the round starts, which deals itself
+   * from the day all over again.
+   */
+  teach(): void {
+    this.#phase = "teaching";
+    this.#emit();
+  }
+
+  /**
+   * Points the board at some cells, or at none.
+   *
+   * @param cells Which cells to ring
+   */
+  setHint(cells: readonly number[]): void {
+    this.#hint = cells;
+    this.#emit();
+  }
+
   /** The same board again, from the top. */
   restart(): void {
     this.start(this.#date);
@@ -559,6 +592,7 @@ export class TetraDo {
     this.#longest = 0;
     this.#solved = 0;
     this.#lastTap = null;
+    this.#hint = [];
     this.#timeLeft = ROUND_MS;
     this.#phase = "playing";
     this.#clearedPop = null;
@@ -625,6 +659,11 @@ export class TetraDo {
 
   // --- tracing ---------------------------------------------------------------
 
+  /** Whether the board is answering to a finger: a round being played, or one being taught on. */
+  #live(): boolean {
+    return this.#phase === "playing" || this.#phase === "teaching";
+  }
+
   /** Starts a trace at a cell. */
   beginTrace(index: number): void {
     if (this.#replaying) return;
@@ -633,7 +672,7 @@ export class TetraDo {
   }
 
   #beginTrace(index: number): void {
-    if (this.#phase !== "playing" || this.#leaving(index)) return;
+    if (!this.#live() || this.#leaving(index)) return;
     this.#path = [index];
     this.#noises.step(0);
     this.#resetSolid();
@@ -655,7 +694,7 @@ export class TetraDo {
   }
 
   #extendTrace(index: number): void {
-    if (this.#phase !== "playing" || this.#path.length === 0) return;
+    if (!this.#live() || this.#path.length === 0) return;
     const last = this.#path[this.#path.length - 1];
     if (index === last) return;
 
@@ -688,7 +727,7 @@ export class TetraDo {
   }
 
   #endTrace(): void {
-    if (this.#phase !== "playing") return;
+    if (!this.#live()) return;
     const word = this.word;
     if (word.length === 0) return;
 
@@ -746,6 +785,7 @@ export class TetraDo {
     if (at - last.at > DOUBLE_TAP_MS) return false;
     // Spent: a third tap starts a new pair rather than erasing again.
     this.#lastTap = null;
+    this.#hint = [];
     return true;
   }
 
@@ -834,7 +874,7 @@ export class TetraDo {
    * @param index The cell to take
    */
   #erase(index: number): void {
-    if (this.#phase !== "playing" || this.#leaving(index)) return;
+    if (!this.#live() || this.#leaving(index)) return;
     this.#noises.back(1);
     this.#take([index]);
     this.#emit();

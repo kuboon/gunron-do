@@ -135,6 +135,7 @@ export const TetraBoard = clientEntry(
 
       const shake = game.shake;
       const burst = game.burst;
+      const hint = game.hint;
 
       return (
         <div
@@ -175,15 +176,26 @@ export const TetraBoard = clientEntry(
             {game.cells.map((cell, index) => (
               <div
                 key={cell.id}
-                mix={[
-                  cellStyle,
-                  animateEntrance({
-                    opacity: 0,
-                    transform: "translateY(-40%)",
-                    duration: 220,
-                  }),
-                  animateLayout(),
-                ]}
+                mix={hint.includes(index)
+                  ? [
+                    cellStyle,
+                    hintStyle,
+                    animateEntrance({
+                      opacity: 0,
+                      transform: "translateY(-40%)",
+                      duration: 220,
+                    }),
+                    animateLayout(),
+                  ]
+                  : [
+                    cellStyle,
+                    animateEntrance({
+                      opacity: 0,
+                      transform: "translateY(-40%)",
+                      duration: 220,
+                    }),
+                    animateLayout(),
+                  ]}
               >
                 <div
                   mix={faceMix(
@@ -193,6 +205,19 @@ export const TetraBoard = clientEntry(
                   )}
                 >
                   {cellGlyph(cell.op)}
+                  {
+                    /*
+                    Which one first. `a b c` comes home and `a c b` does not, so a lesson that
+                    only lit the three cells would be asking for something it had not said.
+                  */
+                  }
+                  {hint.length > 1 && hint.includes(index)
+                    ? (
+                      <span mix={orderStyle} aria-hidden="true">
+                        {hint.indexOf(index) + 1}
+                      </span>
+                    )
+                    : null}
                 </div>
               </div>
             ))}
@@ -419,9 +444,49 @@ const boardStyle = css({
   WebkitTouchCallout: "none",
 });
 
+/**
+ * A cell the walkthrough is pointing at.
+ *
+ * A pulse rather than a static ring: the instruction is under the board and the cells are what the
+ * eye is on, so the board has to be the thing that says "here", and a still outline on a board of
+ * outlines is not a thing that says anything.
+ */
+const hintStyle = css({
+  // Between two thicknesses rather than between a ring and nothing: a ring that goes away half
+  // the time is a ring a player has to wait for.
+  "@keyframes tetra-hint": {
+    "0%, 100%": { boxShadow: `0 0 0 2px ${OP_COLORS[0]}` },
+    "50%": { boxShadow: `0 0 0 5px ${OP_COLORS[0]}` },
+  },
+  borderRadius: "12px",
+  animation: "tetra-hint 1.1s ease-in-out infinite",
+  "@media (prefers-reduced-motion: reduce)": {
+    animation: "none",
+    boxShadow: `0 0 0 3px ${OP_COLORS[0]}`,
+  },
+});
+
+/** The number on a hinted cell: which one to touch first. */
+const orderStyle = css({
+  position: "absolute",
+  top: "-0.35rem",
+  left: "-0.35rem",
+  width: "1.15rem",
+  height: "1.15rem",
+  display: "grid",
+  placeItems: "center",
+  borderRadius: "50%",
+  background: OP_COLORS[0],
+  color: surface.ink,
+  fontSize: "0.7rem",
+  fontWeight: 700,
+  lineHeight: 1,
+});
+
 const cellStyle = css({ aspectRatio: "1" });
 
 const faceStyle = css({
+  position: "relative",
   width: "100%",
   height: "100%",
   borderRadius: "10px",

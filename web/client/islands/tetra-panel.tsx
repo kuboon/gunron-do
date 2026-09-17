@@ -87,8 +87,26 @@ export const TetraPanel = clientEntry(
       game.startReplay(session.date, recording.moves);
     }
 
+    // A first visit is taught rather than told. Not over a recording — a shared round opens on
+    // its own panel, and a lesson would be standing in front of it.
+    //
+    // After the first render rather than during it: hydration matches what the server drew, and
+    // the server drew a page with no lesson on it. Starting one here and now would have the
+    // islands render something else on their very first pass, and what is already in the document
+    // stays where it is rather than being replaced.
+    if (session !== null && session.rec === null && !tutorial.dismissed) {
+      setTimeout(() => tutorial.start(), 0);
+    }
+
+    const stopTutorial = tutorial.subscribe(() => {
+      handle.update();
+    });
+    handle.signal.addEventListener("abort", stopTutorial, { once: true });
+
     return () => {
       if (session === null) return null;
+      // The lesson is the board itself, so the panel has to be off it.
+      if (tutorial.running) return null;
 
       // A recording that has not started, and the numbers it is about to reach.
       if (
@@ -150,10 +168,10 @@ export const TetraPanel = clientEntry(
                 type="button"
                 mix={[
                   secondaryStyle,
-                  on<HTMLButtonElement>("click", () => tutorial.show()),
+                  on<HTMLButtonElement>("click", () => tutorial.start()),
                 ]}
               >
-                遊び方
+                さわって覚える
               </button>
             </div>
             {recording.state === "bad"

@@ -1,9 +1,8 @@
 /**
  * テトラ道 — the game, with the screen to itself.
  *
- * The page is a layout and seven islands: the solid, the clock, the board, the panel that covers
- * the board between rounds, the buttons, the label saying which board this is, and the walkthrough
- * that covers the lot on a first visit. Nothing
+ * The page is a layout and six islands: the solid, the clock, the board, the panel that covers
+ * the board between rounds, the buttons, and the label saying which board this is. Nothing
  * of the game is decided here; `games/tetra-do/` holds the rules and the islands read them, which
  * is what lets this file be the one place that says where each part goes.
  *
@@ -27,7 +26,6 @@ import { TetraHud } from "../islands/tetra-hud.tsx";
 import { TetraSeed } from "../islands/tetra-seed.tsx";
 import { TetraPanel } from "../islands/tetra-panel.tsx";
 import { TetraSolid } from "../islands/tetra-solid.tsx";
-import { TetraTutorial } from "../islands/tetra-tutorial.tsx";
 import { findGame } from "../games.ts";
 import { ink, surface } from "../games/tetra-do/palette.ts";
 import { routes } from "../routes.ts";
@@ -78,9 +76,6 @@ export default function TetraDoPage(): RemixNode {
       <div mix={controlsAreaStyle}>
         <TetraControls />
       </div>
-
-      {/* Fixed over everything when it is up, so where it sits in the layout does not matter. */}
-      <TetraTutorial />
 
       <nav mix={navStyle}>
         <a mix={linkStyle} href={game.rulesHref}>ルールを読む</a>

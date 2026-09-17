@@ -19,6 +19,7 @@ import { game } from "../games/tetra-do/game.ts";
 import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
 import { boardUrl, todayInTokyo } from "../games/tetra-do/session.ts";
 import { sound } from "../games/tetra-do/sound.ts";
+import { tutorial } from "../games/tetra-do/tutorial.ts";
 
 export const TetraControls = clientEntry(
   import.meta.url,
@@ -35,66 +36,123 @@ export const TetraControls = clientEntry(
     });
     handle.signal.addEventListener("abort", stopSound, { once: true });
 
-    return () => (
-      <div mix={controlsStyle}>
-        <button
-          type="button"
-          aria-pressed={sound.enabled ? "true" : "false"}
-          aria-label={sound.enabled ? "音を消す" : "音を出す"}
-          mix={buttonMix(sound.enabled, () => {
-            sound.toggle();
-            handle.update();
-          })}
-        >
-          {
-            /*
-            A browser will not let a page make a noise until someone has touched it. That is
-            normally settled by the button that starts the round, but a page can be sitting here
-            untouched — so on the rare occasion it is still being held back, the button says so.
-          */
-          }
-          {sound.blocked
-            ? "タップで音を出す"
-            : sound.enabled
-            ? "音あり"
-            : "音なし"}
-        </button>
+    const stopTutorial = tutorial.subscribe(() => {
+      handle.update();
+    });
+    handle.signal.addEventListener("abort", stopTutorial, { once: true });
 
-        {game.replaying
-          ? (
-            <>
-              <span mix={badgeStyle} role="status">リプレイ中</span>
-              <button
-                type="button"
-                disabled={game.phase !== "playing"}
-                mix={[
-                  buttonStyle,
-                  on<HTMLButtonElement>(
-                    "click",
-                    () => game.setPaused(!game.paused),
-                  ),
-                ]}
-              >
-                {game.paused ? "再開" : "一時停止"}
-              </button>
+    return () => (
+      // One root, whatever the row is doing. An island that returns a different element on the
+      // client than the server drew leaves the server's behind: the reconciler matches on shape,
+      // and a lesson row where a button row used to be is not the same shape.
+      <div mix={teachStyle}>
+        {tutorial.running ? <p mix={saysStyle}>{tutorial.says}</p> : null}
+
+        <div mix={controlsStyle}>
+          <button
+            type="button"
+            aria-pressed={sound.enabled ? "true" : "false"}
+            aria-label={sound.enabled ? "音を消す" : "音を出す"}
+            mix={buttonMix(sound.enabled, () => {
+              sound.toggle();
+              handle.update();
+            })}
+          >
+            {
+              /*
+              A browser will not let a page make a noise until someone has touched it. That is
+              normally settled by the button that starts the round, but a page can be sitting here
+              untouched — so on the rare occasion it is still being held back, the button says so.
+            */
+            }
+            {sound.blocked
+              ? "タップで音を出す"
+              : sound.enabled
+              ? "音あり"
+              : "音なし"}
+          </button>
+
+          {tutorial.running
+            ? (
+              <>
+                <div mix={dotsStyle} aria-hidden="true">
+                  {Array.from({ length: tutorial.length }, (_, i) => (
+                    <i
+                      key={i}
+                      mix={i < tutorial.at
+                        ? [dotStyle, dotOnStyle]
+                        : [dotStyle]}
+                    />
+                  ))}
+                </div>
+                {tutorial.finished
+                  ? (
+                    <button
+                      type="button"
+                      mix={[
+                        startStyle,
+                        on<HTMLButtonElement>("click", () => {
+                          tutorial.remember(true);
+                          tutorial.stop();
+                          game.restart();
+                        }),
+                      ]}
+                    >
+                      はじめる
+                    </button>
+                  )
+                  : (
+                    <button
+                      type="button"
+                      mix={[
+                        buttonStyle,
+                        on<HTMLButtonElement>("click", () => {
+                          tutorial.remember(true);
+                          tutorial.stop();
+                        }),
+                      ]}
+                    >
+                      とばす
+                    </button>
+                  )}
+              </>
+            )
+            : game.replaying
+            ? (
+              <>
+                <span mix={badgeStyle} role="status">リプレイ中</span>
+                <button
+                  type="button"
+                  disabled={game.phase !== "playing"}
+                  mix={[
+                    buttonStyle,
+                    on<HTMLButtonElement>(
+                      "click",
+                      () => game.setPaused(!game.paused),
+                    ),
+                  ]}
+                >
+                  {game.paused ? "再開" : "一時停止"}
+                </button>
+                <a
+                  mix={linkButtonStyle}
+                  data-rmx-document
+                  href={boardUrl(game.date)}
+                >
+                  自分で挑戦
+                </a>
+              </>
+            )
+            : (
               <a
                 mix={linkButtonStyle}
                 data-rmx-document
-                href={boardUrl(game.date)}
+                href={boardUrl(todayInTokyo())}
               >
-                自分で挑戦
+                今日の盤面
               </a>
-            </>
-          )
-          : (
-            <a
-              mix={linkButtonStyle}
-              data-rmx-document
-              href={boardUrl(todayInTokyo())}
-            >
-              今日の盤面
-            </a>
-          )}
+            )}
+        </div>
       </div>
     );
   },
@@ -107,6 +165,49 @@ function buttonMix(pressed: boolean, act: () => void) {
 }
 
 // --- styles -----------------------------------------------------------------
+
+/** The lesson's line and its own row of buttons, in the space the buttons usually have. */
+const teachStyle = css({
+  display: "grid",
+  gap: "0.6rem",
+});
+
+const saysStyle = css({
+  margin: "0",
+  minHeight: "3rem",
+  color: ink.text,
+  fontSize: "0.95rem",
+  lineHeight: 1.6,
+});
+
+const dotsStyle = css({
+  display: "flex",
+  alignItems: "center",
+  gap: "0.35rem",
+  marginRight: "0.4rem",
+});
+
+const dotStyle = css({
+  width: "0.45rem",
+  height: "0.45rem",
+  borderRadius: "50%",
+  background: surface.edge,
+});
+
+const dotOnStyle = css({ background: OP_COLORS[0] });
+
+/** The one that ends the lesson and starts the round, so it looks like the round's own button. */
+const startStyle = css({
+  font: "inherit",
+  fontWeight: 700,
+  cursor: "pointer",
+  padding: "0.5rem 1.2rem",
+  border: "none",
+  borderRadius: "10px",
+  background: OP_COLORS[0],
+  color: surface.ink,
+  "&:active": { transform: "translateY(1px)" },
+});
 
 const controlsStyle = css({
   display: "flex",
