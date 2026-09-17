@@ -113,8 +113,11 @@ function project(v: Vec3): [number, number, number] {
 
 // --- the fixed floor ---------------------------------------------------------
 
-/** The floor corners, projected once: they do not move, which is the point of them. */
-const FLOOR_POINTS = [0, 1, 2].map((i) => project(VERTICES[i]));
+/** Every corner, projected once: at the home orientation they do not move. */
+const CORNER_POINTS = VERTICES.map(project);
+
+/** The floor's three, which never move at all — that is the point of them. */
+const FLOOR_POINTS = [0, 1, 2].map((i) => CORNER_POINTS[i]);
 
 const FLOOR_CENTER: [number, number] = [
   (FLOOR_POINTS[0][0] + FLOOR_POINTS[1][0] + FLOOR_POINTS[2][0]) / 3,
@@ -131,8 +134,15 @@ function spread(p: readonly number[]): [number, number] {
 
 const FLOOR = FLOOR_POINTS.map(spread).map((p) => `${p[0]},${p[1]}`).join(" ");
 
+/**
+ * The three letters, each sitting on the corner it turns about.
+ *
+ * Pushed out from the floor's centre like the floor itself, so a marker sits clear of the solid
+ * rather than on top of it — which for the corner at the top means pushed upward, away from the
+ * face the `e` is painted on.
+ */
 const MARKERS: readonly Marker[] = [0, 1, 2].map((k) => {
-  const [x, y] = spread(FLOOR_POINTS[AXIS_VERTEX[k]]);
+  const [x, y] = spread(CORNER_POINTS[AXIS_VERTEX[k]]);
   return { x, y, name: ["a", "b", "c"][k], color: OP_COLORS[k] };
 });
 

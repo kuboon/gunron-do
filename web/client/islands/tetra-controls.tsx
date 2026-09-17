@@ -154,26 +154,15 @@ export const TetraControls = clientEntry(
             <div mix={overlayStyle}>
               <div mix={cardStyle}>
                 <h2 mix={cardTitleStyle}>遊び方</h2>
-                <p mix={cardTextStyle}>
-                  マスは、床の三角形の頂点{" "}
-                  <b style={{ color: OP_COLORS[0] }}>a</b>{" "}
-                  <b style={{ color: OP_COLORS[1] }}>b</b>{" "}
-                  <b style={{ color: OP_COLORS[2] }}>c</b>{" "}
-                  のまわりに正四面体を120°回す操作です。塗りつぶしの点は時計回り、白抜きの点（<code>
-                    a⁻¹
-                  </code>{" "}
-                  など）は反時計回りです。
-                </p>
-                <p mix={cardTextStyle}>
-                  上下左右に隣り合うマスをなぞると、その順に回転が重なります。四面体が元の向きに戻る経路なら、指を離したときに消えます。
-                </p>
-                <p mix={cardTextStyle}>
-                  得点は、隣り合う打ち消し（<code>a a⁻¹</code>{" "}
-                  など）を除いた長さの2乗です。打ち消し合っている部分は、なぞっている線が細い破線になります。戻らない経路は消えないだけで、時間は減りません。
-                </p>
-                <p mix={cardTextStyle}>
-                  「なぞり中に立体を回す」をオフにすると、立体は指を離してから答え合わせとして動きます。
-                </p>
+                <ul mix={cardListStyle}>
+                  <li>盤面をなぞるとテトラが回ります</li>
+                  <li>テトラを元通りに戻せる道筋を探そう</li>
+                  <li>
+                    <code>a</code> <code>a⁻¹</code>{" "}
+                    のような単純な打ち消しはスコアになりません
+                  </li>
+                  <li>ダブルタップで1マス消せます</li>
+                </ul>
                 <button
                   type="button"
                   mix={[
@@ -202,7 +191,7 @@ export const TetraControls = clientEntry(
                 <h2 mix={cardTitleStyle}>
                   {game.replaying ? "再生おわり" : "終了"}
                 </h2>
-                <p mix={bigStyle}>{game.score}</p>
+                <p mix={bigStyle}>{game.cleared}</p>
                 <p mix={cardTextStyle}>{summary()}</p>
 
                 {game.replaying
@@ -265,13 +254,13 @@ export const TetraControls = clientEntry(
   },
 );
 
-/** How the round went, on one line. */
+/** How the round went, on one line. The big number above it is the cells. */
 function summary(): string {
   return [
     game.date,
-    `消去 ${game.clears} 回`,
+    `消去 ${game.cleared} マス`,
+    `成立 ${game.solved} 回`,
     `最長 ${game.longest}`,
-    `不成立 ${game.misses} 回`,
   ].join("　");
 }
 
@@ -348,6 +337,24 @@ const cardTextStyle = css({
   fontSize: "0.95rem",
   // The site's base layer paints `code` for a light document; on the card it has to be a chip cut
   // out of the dark rather than a white one laid on it.
+  "& code": {
+    background: "rgba(237, 239, 247, 0.1)",
+    color: ink.text,
+    padding: "0.05rem 0.3rem",
+    borderRadius: "4px",
+    fontSize: "0.9em",
+  },
+});
+
+/** The rules, as four lines you can take in at a glance rather than three paragraphs. */
+const cardListStyle = css({
+  margin: "0 0 0.75rem",
+  paddingLeft: "1.1rem",
+  color: "#cbd1e4",
+  fontSize: "0.95rem",
+  lineHeight: 1.75,
+  "& li": { marginBottom: "0.15rem" },
+  "& b": { color: ink.text },
   "& code": {
     background: "rgba(237, 239, 247, 0.1)",
     color: ink.text,

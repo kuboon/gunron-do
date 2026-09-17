@@ -17,7 +17,7 @@
  */
 
 /** What kind of thing the player did. The order is the wire format; only append to it. */
-const KINDS = ["begin", "extend", "end", "live"] as const;
+const KINDS = ["begin", "extend", "end", "live", "erase"] as const;
 
 /** One thing the player did, and when. */
 export interface Move {
@@ -25,7 +25,7 @@ export interface Move {
   at: number;
   kind: (typeof KINDS)[number];
   /**
-   * What it was done to: the cell, for `begin` and `extend`.
+   * What it was done to: the cell, for `begin`, `extend` and `erase`.
    *
    * `end` ignores it, and `live` carries the setting itself — `1` when the solid turns under the
    * finger, `0` when it waits for the answer.
@@ -33,8 +33,14 @@ export interface Move {
   value: number;
 }
 
-/** Bumped if the format ever changes, so an old link is refused rather than misread. */
-const VERSION = 1;
+/**
+ * Bumped if the format ever changes, so an old link is refused rather than misread.
+ *
+ * 2 is the round going from ninety seconds to sixty. The bytes did not change, but what they
+ * mean did: a round recorded against the longer clock would lose its last third here, and a
+ * replay that quietly stops short is worse than one that says it cannot read the link.
+ */
+const VERSION = 2;
 
 /** Times are kept to a hundredth of a second, which is finer than a finger and half the bytes. */
 const TICK_MS = 10;

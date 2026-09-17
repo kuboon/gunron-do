@@ -53,17 +53,22 @@ export const VERTICES: readonly Vec3[] = [
   [-1, -1, 1],
 ];
 
-/** The corner the solid stands on top of. The other three are the floor it stands on. */
+/** The corner the solid stands on top of. */
 export const APEX = 3;
 
 /**
  * Which corner each of `a b c` turns about.
  *
- * The order is the one that makes the labels read the way the floor is drawn — `a` bottom right,
- * `b` top, `c` bottom left — and it is also the assignment under which `a b c` is the identity, so
- * the shortest clearing trace on the board is the three letters in order.
+ * The three corners around the face the `e` is painted on, which is the face turned toward the
+ * viewer at rest. So the letters are the triangle you are looking at, and the fourth corner —
+ * the one hidden behind, opposite the `e` — is the unlabelled one. That is also why a cell's own
+ * little triangle reads as the solid seen from the front.
+ *
+ * Which three corners, and in which order, is not free: this is one of the three assignments on
+ * that face under which `a b c` is the identity, so the shortest clearing trace on the board
+ * stays the three letters in order.
  */
-export const AXIS_VERTEX: readonly number[] = [0, 2, 1];
+export const AXIS_VERTEX: readonly number[] = [0, 1, 3];
 
 /** How many letters a clearing trace has to have left once the cancellations are taken out. */
 export const MIN_REDUCED_LENGTH = 3;
