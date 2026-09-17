@@ -198,7 +198,16 @@ function float(
 
 // --- styles -----------------------------------------------------------------
 
-const hudStyle = css({ display: "grid", gap: "0.4rem" });
+/**
+ * Stacked above what comes after it, because the countdown hangs below the bar and out of this
+ * area — into the solid's, which is drawn later and would otherwise paint straight over it.
+ */
+const hudStyle = css({
+  display: "grid",
+  gap: "0.4rem",
+  position: "relative",
+  zIndex: 1,
+});
 
 const rowStyle = css({
   display: "flex",

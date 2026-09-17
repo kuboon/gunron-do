@@ -37,6 +37,8 @@ export const TetraSolid = clientEntry(
     return () => {
       const scene = buildScene(game.orientation, game.axis);
       const { flash, glow } = game;
+      // The face the `e` is on: the one a clear is about, and so the one a clear lights.
+      const markFace = scene.faces.find((face) => face.markTransform !== null);
 
       return (
         <svg
@@ -152,13 +154,21 @@ export const TetraSolid = clientEntry(
             </g>
           ))}
 
-          {flash > 0
+          {
+            /*
+            The clear, on the face it is about. The `e` face is already washed and blooming from
+            the glow underneath; this is the rim that goes round it, drawn last so it sits over
+            everything, and it is what says *cleared* rather than merely *home*.
+          */
+          }
+          {flash > 0 && markFace !== undefined
             ? (
               <polygon
-                points={scene.floor}
+                points={markFace.points}
                 fill="none"
                 stroke={ink.good}
-                stroke-width={0.04 + 0.1 * flash}
+                stroke-width={0.05 + 0.13 * flash}
+                stroke-linejoin="round"
                 opacity={flash}
               />
             )

@@ -326,7 +326,7 @@ export class TetraDo {
   get axis(): number | null {
     return this.#axis;
   }
-  /** `1` just after a clear, fading to `0`: the ring around the floor. */
+  /** `1` just after a clear, fading to `0`: the rim lighting up around the `e` face. */
   get flash(): number {
     return this.#flash;
   }
