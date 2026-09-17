@@ -10,9 +10,13 @@
  * meant to say *today* and would go stale the moment it was read. A day in the URL is now only
  * ever a day somebody meant: a board being talked about, or a round being replayed.
  *
- * `?date=` and something that is not a day is the one thing that does get tidied, because it is
- * the one thing that cannot be meant. It is taken out — not corrected to today, which would put a
- * date back in the address that nobody asked for.
+ * What does get tidied is anything the page cannot read. `?date=` with something that is not a day
+ * is taken out — not corrected to today, which would put a date back in an address nobody asked
+ * for — and so is any parameter that is not `date` or `rec`, which in practice means whatever a
+ * link shortener, a mail client or a social network stuck on the end of the URL on the way here.
+ * `?fbclid=…` is not about this board and never was, and a player who copies the address out of
+ * the bar to send to somebody should be sending them the board, not a note about where they
+ * personally came from.
  *
  * Today is Tokyo's today, wherever the player is. A board that changed at the reader's local
  * midnight would be a different board for two people talking about it, which is the one thing a
@@ -104,37 +108,37 @@ export function shareUrl(date: string, rec: string): string {
 }
 
 /**
- * What this page is, from its URL.
+ * What this page is, from its URL — and the URL tidied to just that.
  *
- * A missing day is today's, and the address is left exactly as it was. A day that is not a day —
- * `?date=2026-02-31`, which has the shape and is not a date — is today's too, and that one word
- * comes out of the address, because a board is the only thing this page can be and `2026-02-31` is
- * not naming one.
+ * The query is rebuilt from the two things this page understands rather than edited, which is one
+ * rule instead of a list of them: a day that is not a day goes, `?fbclid=…` and its family go,
+ * a parameter given twice becomes one, and the order is always the same. A missing day is today's
+ * and writes nothing, so the address a player arrives at by typing the page's own name is the
+ * address they stay at.
  *
- * Taken out rather than replaced with today: correcting it would put a date back in an address
- * nobody asked for, which is the thing this stopped doing. And taken out with `replaceState`
- * rather than a navigation, so the page it is already loading is the page that runs, and the back
- * button still goes where the player came from.
+ * Put back with `replaceState` rather than a navigation, so the page already loading is the page
+ * that runs, and the back button still goes where the player came from. And put back only when it
+ * differs, so the ordinary case touches nothing at all.
  *
- * Runs in a browser only — `readSession`'s caller checks for one first.
+ * Runs in a browser only — the caller checks for one first.
  *
  * @returns The session this URL describes
  */
 export function readSession(): Session {
   const url = new URL(globalThis.location.href);
-  const date = url.searchParams.get("date");
+  const asked = url.searchParams.get("date");
+  const date = asked !== null && isDate(asked) ? asked : null;
+  const rec = url.searchParams.get("rec");
 
-  if (date !== null && !isDate(date)) {
-    url.searchParams.delete("date");
-    globalThis.history.replaceState(
-      null,
-      "",
-      `${url.pathname}${url.search}${url.hash}`,
-    );
+  const tidy = new URLSearchParams();
+  if (date !== null) tidy.set("date", date);
+  if (rec !== null) tidy.set("rec", rec);
+
+  const query = tidy.toString();
+  const wanted = `${url.pathname}${query === "" ? "" : `?${query}`}${url.hash}`;
+  if (wanted !== `${url.pathname}${url.search}${url.hash}`) {
+    globalThis.history.replaceState(null, "", wanted);
   }
 
-  return {
-    date: date !== null && isDate(date) ? date : todayInTokyo(),
-    rec: url.searchParams.get("rec"),
-  };
+  return { date: date ?? todayInTokyo(), rec };
 }
