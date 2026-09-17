@@ -174,10 +174,13 @@ const teachStyle = css({
 
 const saysStyle = css({
   margin: "0",
-  minHeight: "3rem",
+  // What happened and what to do next, one per line, and a fixed height so the row below does not
+  // jump every time the lesson moves on.
+  whiteSpace: "pre-line",
+  minHeight: "3.2rem",
   color: ink.text,
-  fontSize: "0.95rem",
-  lineHeight: 1.6,
+  fontSize: "0.9rem",
+  lineHeight: 1.55,
 });
 
 const dotsStyle = css({

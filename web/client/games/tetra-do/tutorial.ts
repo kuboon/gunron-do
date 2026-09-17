@@ -16,36 +16,37 @@
  */
 
 import { game } from "./game.ts";
-import { findClearing, findPair, findSpare } from "./hint.ts";
+import { findClearing, findErasable, findPair } from "./hint.ts";
 
 /** Where the preference is kept between visits. */
 const STORAGE_KEY = "tetra-do:tutorial";
 
-/** What a step asks for, and what to say while it is being asked. */
+/** What a step asks for, and what to say once it has been done. */
 export interface Step {
   /** The instruction, before the player has done it. */
   ask: string;
-  /** What to say once they have. */
+  /** What just happened, said once they have. */
   done: string;
 }
 
 const STEPS: readonly Step[] = [
   {
-    ask: "光ったマスを順になぞってみよう。指を動かすとテトラが回ります。",
-    done: "テトラが元の向きに戻ったので、なぞった道が消えました。",
+    ask: "光ったマスを順になぞってみよう。",
+    done: "テトラが元の向きに戻り、道が消えました。",
   },
   {
     ask: "この2マスは打ち消し合います。なぞってみよう。",
-    done: "消えますが、回転としては何もしていないのでスコアにはなりません。",
+    done: "消えましたが、スコアには入りません。",
   },
   {
-    ask: "邪魔なマスはダブルタップ。光ったマスを2回叩いてみよう。",
-    done: "1マスだけ消えました。これは何にも数えません。",
+    ask: "邪魔なマスは2回叩くと消えます。",
+    done: "上のマスが落ちてきました。",
+  },
+  {
+    ask: "道がつながりました。なぞってみよう。",
+    done: "長い道ほど「最長」が伸びます。",
   },
 ];
-
-/** How long the "you did it" line stays up before the next thing to do. */
-const BEAT_MS = 1400;
 
 class Tutorial {
   #running = false;
@@ -53,8 +54,6 @@ class Tutorial {
   #at = 0;
   /** The cell ids the current step is waiting to see the back of. */
   #awaiting: number[] = [];
-  /** Set between doing a step and being given the next one. */
-  #cheering = false;
   /** `null` until the preference has been read, so the read happens in a browser. */
   #dismissed: boolean | null = null;
   #listeners = new Set<() => void>();
@@ -65,11 +64,20 @@ class Tutorial {
     return this.#running;
   }
 
-  /** What to say right now, or `null` when there is nothing to say. */
+  /**
+   * What to say right now, or `null` when there is nothing to say.
+   *
+   * What just happened and what to do next, together. On its own, the line about what happened
+   * was replaced by the next instruction before it could be read — and it is the half that does
+   * the teaching, because it is the half that arrives at the moment the player is looking.
+   */
   get says(): string | null {
     if (!this.#running) return null;
-    if (this.#at >= STEPS.length) return "これで遊べます。";
-    return this.#cheering ? STEPS[this.#at].done : STEPS[this.#at].ask;
+    const done = this.#at > 0 ? STEPS[this.#at - 1].done : "";
+    const ask = this.#at >= STEPS.length
+      ? "これで遊べます。"
+      : STEPS[this.#at].ask;
+    return done === "" ? ask : `${done}\n${ask}`;
   }
 
   /** Whether every step is done, so the only thing left is to start. */
@@ -109,7 +117,6 @@ class Tutorial {
     if (this.#running) return;
     this.#running = true;
     this.#at = 0;
-    this.#cheering = false;
     game.teach();
     this.#watching ??= game.subscribe(() => this.#check());
     this.#ask();
@@ -162,11 +169,15 @@ class Tutorial {
   /** Points at whatever this step is about, on the board as it stands now. */
   #ask(): void {
     const ops = game.cells.map((cell) => cell.op);
+    const erasable = this.#at === 2 ? findErasable(ops) : null;
     const cells = this.#at === 0
       ? findClearing(ops)
       : this.#at === 1
       ? findPair(ops)
-      : [findSpare(ops, [])];
+      : this.#at === 2
+      ? (erasable === null ? null : [erasable])
+      // After the fall: the longest path the board now holds, which is the one the fall opened.
+      : findClearing(ops, { longest: true });
 
     // A board with nothing of this kind on it — rare, and not worth stalling the lesson over.
     if (cells === null) {
@@ -180,24 +191,23 @@ class Tutorial {
     game.setHint(cells);
   }
 
-  /** The step is done when the cells it pointed at are gone, however they went. */
+  /**
+   * The step is done when the cells it pointed at are gone, however they went.
+   *
+   * The next step is asked for on the board as it stands *after* the cells have fallen, not as it
+   * stood when they popped — so this waits for the board to have closed over the gap.
+   */
   #check(): void {
-    if (!this.#running || this.#cheering || this.#awaiting.length === 0) return;
+    if (!this.#running || this.#awaiting.length === 0) return;
+    if (game.popping.size > 0) return;
     const there = new Set(game.cells.map((cell) => cell.id));
     if (this.#awaiting.some((id) => there.has(id))) return;
 
     this.#awaiting = [];
-    this.#cheering = true;
-    game.setHint([]);
+    this.#at += 1;
+    if (this.#at < STEPS.length) this.#ask();
+    else game.setHint([]);
     this.#emit();
-
-    setTimeout(() => {
-      if (!this.#running) return;
-      this.#cheering = false;
-      this.#at += 1;
-      if (this.#at < STEPS.length) this.#ask();
-      this.#emit();
-    }, BEAT_MS);
   }
 
   #emit(): void {
