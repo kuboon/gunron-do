@@ -242,6 +242,8 @@ export class TetraDo {
   #longestPop: Pop | null = null;
   /** The last single-cell tap, for spotting the second one. */
   #lastTap: { index: number; at: number } | null = null;
+  /** Whether the gesture in progress has ever been more than one cell, and so is not a tap. */
+  #dragged = false;
   /** Cells the walkthrough is pointing at, for the board to ring. */
   #hint: readonly number[] = [];
   #popId = 0;
@@ -592,6 +594,7 @@ export class TetraDo {
     this.#longest = 0;
     this.#solved = 0;
     this.#lastTap = null;
+    this.#dragged = false;
     this.#hint = [];
     this.#timeLeft = ROUND_MS;
     this.#phase = "playing";
@@ -674,6 +677,7 @@ export class TetraDo {
   #beginTrace(index: number): void {
     if (!this.#live() || this.#leaving(index)) return;
     this.#path = [index];
+    this.#dragged = false;
     this.#noises.step(0);
     this.#resetSolid();
     this.#turn(this.#cells[index].op, TURN_MS);
@@ -711,6 +715,12 @@ export class TetraDo {
       this.#leaving(index)
     ) return;
     this.#path.push(index);
+    // From here this gesture is a trace, whatever it ends up being: the finger has visibly left
+    // the cell it started on. So it is not a tap, and it breaks any tap still waiting for a
+    // partner — two taps with a trace between them are two gestures the player watched happen
+    // separately, and reading them as one double tap erases a cell nobody asked about.
+    this.#dragged = true;
+    this.#lastTap = null;
     // The ladder climbs with what the trace is worth, not with how long it is: a move that
     // cancels the one before it adds nothing to the score, so it adds nothing to the pitch —
     // and undoes the last rung, which is the same thing the dashed line says.
@@ -738,7 +748,7 @@ export class TetraDo {
       const index = this.#path[0];
       this.#path = [];
       this.#rightSolid();
-      if (this.#doubleTapped(index)) {
+      if (!this.#dragged && this.#doubleTapped(index)) {
         this.#write("erase", index);
         this.#erase(index);
         return;
@@ -771,14 +781,20 @@ export class TetraDo {
   /**
    * Whether this tap is the second one on the same cell, soon enough to be one gesture.
    *
-   * The clock is the game's, so a recording taps twice exactly where it tapped twice. A replay
-   * never asks: the erase is in the recording as itself, and asking again would double it.
+   * Timed on `#clock` rather than on what is left of the round. Both are the game's own time —
+   * which is what makes a recording tap twice exactly where it tapped twice — but the round's
+   * clock does not run during a lesson, and a window measured against a clock that is not moving
+   * is not a window: there, every second tap on a cell was the second half of a double tap,
+   * however long ago and whatever else had happened in between. `#clock` moves in every phase.
+   *
+   * A replay never asks: the erase is in the recording as itself, and asking again would double
+   * it.
    *
    * @param index The cell that was tapped
    */
   #doubleTapped(index: number): boolean {
     if (this.#replaying || this.#leaving(index)) return false;
-    const at = ROUND_MS - this.#timeLeft;
+    const at = this.#clock;
     const last = this.#lastTap;
     this.#lastTap = { index, at };
     if (last === null || last.index !== index) return false;
