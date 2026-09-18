@@ -102,3 +102,28 @@
     border-radius: var(--radius-sm);
   }
 }
+
+/*
+ * The share row, where a page puts one.
+ *
+ * Unlayered, and it has to be. `@kuboon/share-element` injects its own defaults as a plain
+ * `<style>` with no layer, and unlayered CSS outranks every `@layer` whatever the specificity — so
+ * the same rules inside `app`, or in a `css(...)` mixin in `rmx`, would lose to a `:where()`
+ * selector that counts for nothing. This is the one place on this site that sits outside the
+ * cascade order the top of this file sets up, and the reason is entirely the package's.
+ *
+ * What they say is the least that will travel: transparent, outlined in whatever colour the text
+ * around them is. The package already gives the glyphs `color: inherit`, so a row dropped on the
+ * game's dark panel and a row dropped on an article both come out reading as part of the thing
+ * they are sitting on, with no palette restated here to drift from the real one.
+ */
+[data-share-row] .share-buttons__button {
+  background: transparent;
+  border-color: currentColor;
+  opacity: 0.7;
+}
+
+[data-share-row] .share-buttons__button:hover {
+  background: transparent;
+  opacity: 1;
+}

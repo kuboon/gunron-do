@@ -17,7 +17,15 @@
  * gets to say what the round was worth first, which is the better trade anyway.
  */
 
-import { clientEntry, css, type Handle, on } from "@remix-run/ui";
+import { createShareButtons } from "@kuboon/share-element";
+import {
+  clientEntry,
+  css,
+  type Handle,
+  on,
+  ref,
+  type RemixNode,
+} from "@remix-run/ui";
 
 import { game, type Outcome, outcome } from "../games/tetra-do/game.ts";
 import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
@@ -134,6 +142,7 @@ export const TetraPanel = clientEntry(
                 自分で挑戦
               </a>
             </div>
+            {shareRow()}
           </div>
         );
       }
@@ -152,7 +161,23 @@ export const TetraPanel = clientEntry(
               </li>
               <li>ダブルタップで1マス消せます</li>
             </ul>
+            {
+              /*
+              練習 before 始める, and the quieter of the two. A player who has not played before
+              reads left to right and finds the thing to do first that has no clock on it; a player
+              who has reads neither and presses the one that is coloured in.
+            */
+            }
             <div mix={buttonsStyle}>
+              <button
+                type="button"
+                mix={[
+                  secondaryStyle,
+                  on<HTMLButtonElement>("click", () => tutorial.start()),
+                ]}
+              >
+                練習
+              </button>
               <button
                 type="button"
                 mix={[
@@ -164,15 +189,6 @@ export const TetraPanel = clientEntry(
                 ]}
               >
                 始める
-              </button>
-              <button
-                type="button"
-                mix={[
-                  secondaryStyle,
-                  on<HTMLButtonElement>("click", () => tutorial.start()),
-                ]}
-              >
-                さわって覚える
               </button>
             </div>
             {recording.state === "bad"
@@ -252,6 +268,47 @@ export const TetraPanel = clientEntry(
     };
   },
 );
+
+/**
+ * The share row under 再生する.
+ *
+ * `@kuboon/share-element`'s `<share-buttons>`, built by hand rather than written as a tag: it is a
+ * custom element and the JSX here knows the DOM's own elements only, so calling the package's
+ * constructor is the honest way round — cheaper than a declaration file that teaches the compiler
+ * about one tag.
+ *
+ * No `url` given. The row reads `location.href` at the moment of the click, and the page this
+ * panel is on *is* the round: the date and the recording in the address are what put the panel
+ * here. Writing the URL out again would be saying the same thing twice, and the copy would be the
+ * one that goes wrong.
+ *
+ * `data-rmx-preserve-dom` because the buttons are not this island's to redraw: without it the
+ * reconciler takes the subtree back on the next render and the row is built again on the one
+ * after. `data-share-row` is what the unlayered rules in `static/app.css` key off — the package
+ * injects its own defaults unlayered, and unlayered CSS outranks every `@layer`, so a `css(...)`
+ * mixin cannot reach them.
+ *
+ * @returns The row's own box, filled once it is in the document
+ */
+function shareRow(): RemixNode {
+  return (
+    <div
+      mix={[shareStyle, ref(fillShareRow)]}
+      data-rmx-preserve-dom
+      data-share-row
+    />
+  );
+}
+
+/**
+ * Puts the buttons in the box, once.
+ *
+ * @param node The box, or `null` as it goes away
+ */
+function fillShareRow(node: Element | null): void {
+  if (node === null || node.firstElementChild !== null) return;
+  node.append(createShareButtons());
+}
 
 /** The three numbers, in the order the clock line puts them. */
 function scoreboard(result: Outcome) {
@@ -336,6 +393,18 @@ const scoreStyle = css({
     fontVariantNumeric: "tabular-nums",
     lineHeight: 1,
   },
+});
+
+/**
+ * The share row's own box: a rule above it, and the air a second row of buttons needs.
+ *
+ * What the buttons themselves look like is not here. They are the package's, and the package's
+ * defaults are unlayered — see `static/app.css`.
+ */
+const shareStyle = css({
+  marginTop: "1rem",
+  paddingTop: "0.9rem",
+  borderTop: `1px solid ${surface.edge}`,
 });
 
 const noteStyle = css({
