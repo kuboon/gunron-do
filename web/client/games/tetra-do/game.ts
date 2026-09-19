@@ -757,6 +757,20 @@ export class TetraDo {
       this.#path.includes(index) || !adjacent(index, last) ||
       this.#leaving(index)
     ) return;
+
+    // Where the line stops, the trace stops. Past the cell the allowance ran out on there is
+    // nothing for the board to draw, and a trace that went on growing under an undrawn line would
+    // have to be backed out of from memory — the finger retracing a path nothing on screen is
+    // showing it. So a move that would leave the trace broken is not taken at all.
+    //
+    // A move that brings the count back down still is. That one the board can draw: it un-breaks
+    // the trace, and the whole line comes back with it. Which is also why this asks what the move
+    // would leave behind rather than refusing everything — at a dead end the cells that answer
+    // are the way out of it.
+    if (this.broken && chain([...this.word, this.#cells[index].op]).broken) {
+      return;
+    }
+
     this.#path.push(index);
     // The ladder climbs with what the trace is worth, not with how long it is: a move that
     // cancels the one before it adds nothing to the score, so it adds nothing to the pitch —

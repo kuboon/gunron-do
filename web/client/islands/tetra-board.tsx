@@ -272,17 +272,16 @@ export const TetraBoard = clientEntry(
                   // Dead everywhere is not the same as wrong everywhere, though, and a line that
                   // only said *dead* left the player to work out which rule they had broken and
                   // where. So the stretch that actually spent the allowance is drawn in the bad
-                  // colour, and the line stops at the far end of it: past that cell there is
-                  // nothing a move could buy, and a line that went on growing would suggest
-                  // otherwise. The stretches before it stay dim — worth nothing, because the
-                  // trace is, but not the part that went wrong.
+                  // colour. It is the end of the line too, but nothing here arranges that: the
+                  // trace stops growing at that cell, so there is nothing past it to draw.
+                  // The stretches before it stay dim — worth nothing, because the trace is, but
+                  // not the part that went wrong.
                   //
                   // Both ends, not either: the step from a move that counts into one that does
                   // not is still the trace going somewhere. Only the link between two struck-out
                   // moves is a bridge — it scores nothing and costs nothing, and it carries the
                   // finger to the other side. So it is drawn as the road's two edges without the
                   // road: unbroken, because it connects, and hollow, because nothing of it counts.
-                  if (overrun !== null && step >= overrun.to) return null;
                   const from = center(path[step]);
                   const dead = broken;
                   const spent = overrun !== null && step >= overrun.from;

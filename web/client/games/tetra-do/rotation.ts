@@ -355,8 +355,8 @@ export interface Overrun {
   /**
    * The cell the count reached {@link MAX_OPEN} on.
    *
-   * Also the last cell of the trace worth drawing a line to. Every move past it is a move the
-   * stretch cannot pay for, so there is nothing to show for one.
+   * Also where the trace ends, while it is broken: every move past it is one the stretch cannot
+   * pay for, so the board declines to take it rather than growing a path it has nothing to draw.
    */
   to: number;
 }
