@@ -17,6 +17,7 @@
  */
 
 import {
+  chain,
   compose,
   IDENTITY,
   isIdentity,
@@ -399,6 +400,22 @@ export class TetraDo {
   get cells(): readonly Cell[] {
     return this.#cells;
   }
+  /**
+   * Whether the trace in progress has already gone too far to count.
+   *
+   * Read by the board, which draws a spoiled trace the way it draws a cancelled pair: dim and
+   * dashed, meaning *this is worth nothing*. Said while the finger is still down, because a rule
+   * a player only meets when they lift is a rule they cannot play around.
+   */
+  get broken(): boolean {
+    return this.#path.length > 0 && chain(this.word).broken;
+  }
+
+  /** How many cells the trace has gone since the solid was last home. */
+  get since(): number {
+    return this.#path.length === 0 ? 0 : chain(this.word).since;
+  }
+
   /** The cells being traced, in the order they were touched. */
   get path(): readonly number[] {
     return this.#path;
@@ -724,7 +741,12 @@ export class TetraDo {
     // The ladder climbs with what the trace is worth, not with how long it is: a move that
     // cancels the one before it adds nothing to the score, so it adds nothing to the pitch —
     // and undoes the last rung, which is the same thing the dashed line says.
-    this.#noises.step(Math.max(0, reducedLength(this.word) - 1));
+    // The ladder climbs with what the trace is worth. A trace that has gone too far to close is
+    // worth nothing from here on, so it stops climbing — the same thing the dimmed line says, in
+    // the ear rather than the eye.
+    this.#noises.step(
+      this.broken ? 0 : Math.max(0, reducedLength(this.word) - 1),
+    );
     this.#turn(this.#cells[index].op, TURN_MS);
     this.#emit();
   }
@@ -767,7 +789,12 @@ export class TetraDo {
       return;
     }
 
-    if (isIdentity(compose(word)) && reduced >= MIN_REDUCED_LENGTH) {
+    // Home, long enough to be an answer, and closed often enough along the way. The last of the
+    // three is what keeps length worth something: see `MAX_OPEN`.
+    if (
+      isIdentity(compose(word)) && reduced >= MIN_REDUCED_LENGTH &&
+      !chain(word).broken
+    ) {
       this.#solve(reduced);
       return;
     }
