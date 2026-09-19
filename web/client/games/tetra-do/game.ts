@@ -27,6 +27,7 @@ import {
   OP_ROTATIONS,
   opBase,
   opInverse,
+  type Overrun,
   type Quat,
   reducedLength,
   slerp,
@@ -411,6 +412,11 @@ export class TetraDo {
     return this.#path.length === 0 ? 0 : chain(this.word).since;
   }
 
+  /** Which cells of the trace spent the allowance, for the board to say so with. */
+  get overrun(): Overrun | null {
+    return this.#path.length === 0 ? null : chain(this.word).overrun;
+  }
+
   /** The cells being traced, in the order they were touched. */
   get path(): readonly number[] {
     return this.#path;
@@ -751,6 +757,14 @@ export class TetraDo {
       this.#path.includes(index) || !adjacent(index, last) ||
       this.#leaving(index)
     ) return;
+
+    // Where the line stops, the trace stops. A stretch that has spent the allowance cannot spend
+    // its way out of it — no move it makes from here can bring it home inside six — so the trace
+    // takes none, and the only way on is the way back. Letting it grow instead would grow it
+    // under an undrawn line, and a path nothing on screen is showing is one the finger would have
+    // to retrace from memory.
+    if (this.broken) return;
+
     this.#path.push(index);
     // The ladder climbs with what the trace is worth, not with how long it is: a move that
     // cancels the one before it adds nothing to the score, so it adds nothing to the pitch —

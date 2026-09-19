@@ -15,11 +15,14 @@
  * would slide into it and back out again.
  *
  * The line the finger leaves is the one place the scoring is visible while it can still be
- * changed, which is the moment it is worth knowing. It says three things. A link that counts is
+ * changed, which is the moment it is worth knowing. It says four things. A link that counts is
  * the full line. A link between two moves that cancel each other is a bridge — it scores nothing,
  * it costs nothing against the six, and it gets the finger across — so it is drawn hollow, as two
  * rails with the road missing, and its cells keep their own surface. A trace that has gone too
- * far to come home is the other one: thin, dim and dashed, all the way along.
+ * far to come home is thin, dim and dashed all the way along, because none of it is worth
+ * anything now. And the stretch that actually spent the allowance is that dashed line in the bad
+ * colour, ending where the allowance ran out — which is the difference between telling a player
+ * their trace is dead and telling them where they killed it.
  *
  * What it reads is the game; what it writes is three calls on it. No rule is decided here.
  */
@@ -143,6 +146,7 @@ export const TetraBoard = clientEntry(
       const { cancelled } = freeReduction(game.word);
 
       const broken = game.broken;
+      const overrun = game.overrun;
       const shake = game.shake;
       const burst = game.burst;
       const hint = game.hint;
@@ -258,12 +262,20 @@ export const TetraBoard = clientEntry(
                     sparks(cell, burst, center(cell.index), cellSize())
                   )}
                 {path.slice(1).map((to, step) => {
-                  // Three things a link can be, and the line says which.
+                  // Four things a link can be, and the line says which.
                   //
                   // A trace that has gone too far without coming home is dead, whatever it does
                   // next, and the player has to see that while the finger is still down — a rule
                   // you only meet on lifting is a rule you cannot play around. Dim, thin, dashed:
                   // cut.
+                  //
+                  // Dead everywhere is not the same as wrong everywhere, though, and a line that
+                  // only said *dead* left the player to work out which rule they had broken and
+                  // where. So the stretch that actually spent the allowance is drawn in the bad
+                  // colour. It is the end of the line too, but nothing here arranges that: the
+                  // trace stops growing at that cell, so there is nothing past it to draw.
+                  // The stretches before it stay dim — worth nothing, because the trace is, but
+                  // not the part that went wrong.
                   //
                   // Both ends, not either: the step from a move that counts into one that does
                   // not is still the trace going somewhere. Only the link between two struck-out
@@ -272,6 +284,7 @@ export const TetraBoard = clientEntry(
                   // road: unbroken, because it connects, and hollow, because nothing of it counts.
                   const from = center(path[step]);
                   const dead = broken;
+                  const spent = overrun !== null && step >= overrun.from;
                   const bridging = !dead && cancelled[step] &&
                     cancelled[step + 1];
                   const [x2, y2] = center(to);
@@ -306,8 +319,8 @@ export const TetraBoard = clientEntry(
                       y1={from[1]}
                       x2={x2}
                       y2={y2}
-                      stroke={dead ? ink.muted : ink.text}
-                      stroke-opacity={dead ? 0.4 : 0.7}
+                      stroke={spent ? ink.bad : dead ? ink.muted : ink.text}
+                      stroke-opacity={spent ? 0.85 : dead ? 0.4 : 0.7}
                       stroke-width={Math.max(4, cellSize() * 0.13) *
                         (dead ? 0.6 : 1)}
                       stroke-dasharray={dead
