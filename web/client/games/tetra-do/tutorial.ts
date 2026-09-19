@@ -36,9 +36,17 @@ import type { Op } from "./rotation.ts";
 const STORAGE_KEY = "tetra-do:tutorial";
 
 /** What a step is waiting to see happen to the cells it pointed at. */
-type Awaiting =
-  | { kind: "gone"; ids: number[] }
-  | { kind: "moved"; ids: number[]; at: number[] };
+interface Awaiting {
+  /** Gone, or moved: which of the two is this step being done. */
+  kind: "gone" | "moved";
+  /** The cells pointed at, by their own identity rather than by where they are. */
+  ids: number[];
+  /** Where each of them was when the step began. */
+  at: number[];
+}
+
+/** Where a step stands, once the board has stopped moving. */
+type Standing = "waiting" | "done" | "broken";
 
 /** The six moves, named the way the cells read, so the board below can be looked at. */
 const A: Op = 0;
@@ -233,41 +241,84 @@ class Tutorial {
     };
   }
 
+  /** Whether a step's cells are still holding the step. */
+  #holds(step: Step): boolean {
+    return step.cells.every((index, i) =>
+      game.cells[index].op === step.word[i]
+    );
+  }
+
   /** Points at this step's cells, once they are still the cells the step is about. */
   #ask(): void {
     const step = STEPS[this.#at];
-
-    // The board stays the lesson's only for as long as the player stays on it. Nothing stops them
-    // clearing or swapping something of their own between steps — the rules here are the real
-    // ones — and a board that has been played on no longer holds the written-down shapes where
-    // they were written down. Pointing at those cells anyway would be pointing at nothing. So the
-    // lesson checks its own board first, and starts over on a fresh one when it has been moved.
-    const cells = [...step.cells];
-    if (cells.some((index, i) => game.cells[index].op !== step.word[i])) {
+    if (!this.#holds(step)) {
       this.#relay();
       return;
     }
 
     // Three of the four steps end with the cells gone. The swap ends with them still there and
     // somewhere else, so that one watches for the move instead.
+    const cells = [...step.cells];
     const ids = cells.map((index) => game.cells[index].id);
-    this.#awaiting = this.#at === 2
-      ? { kind: "moved", ids, at: cells }
-      : { kind: "gone", ids };
+    this.#awaiting = {
+      kind: this.#at === 2 ? "moved" : "gone",
+      ids,
+      at: cells,
+    };
     game.setHint(cells);
   }
 
-  /** Lays the board out again and begins again, after the player wandered off the lesson. */
+  /**
+   * Lays the board out again, after the player wandered off the lesson.
+   *
+   * A board as dealt carries most of the steps where they were laid out, but not the last one:
+   * the trace it asks for is only there once the swap before it has been made. So the lesson
+   * picks up at the last step the fresh board can actually hold, which is asked of the board
+   * rather than written down.
+   */
   #relay(): void {
     this.#awaiting = null;
-    this.#at = 0;
     this.#relaid = true;
     game.teach(BOARD);
+    while (this.#at > 0 && !this.#holds(STEPS[this.#at])) this.#at -= 1;
     this.#ask();
   }
 
   /**
-   * The step is done when the cells it pointed at are gone, however they went.
+   * Where the current step stands: still being worked on, done, or off the rails.
+   *
+   * The rules here are the real ones, so nothing stops a player clearing or swapping something of
+   * their own instead of what they were pointed at. When they do, the cells the instruction is
+   * about may be somewhere else or gone, and then the instruction on screen is asking for
+   * something the board can no longer do — which is a dead end rather than a mistake, and the
+   * lesson has to say so rather than wait for it.
+   *
+   * Done and broken are told apart by the cells themselves rather than by what is in those
+   * positions now. A step that wanted them gone is done when all of them have gone and broken
+   * when any that is left has moved; a step that wanted them moved is the other way round. Either
+   * way, cells sitting where they were put still have to be holding the step — a refill can
+   * deal the very move the lesson wanted back into the place it came from.
+   */
+  #judge(waiting: Awaiting): Standing {
+    const where = waiting.ids.map((id) =>
+      game.cells.findIndex((cell) => cell.id === id)
+    );
+    const moved = where.some((index, i) => index !== waiting.at[i]);
+
+    if (waiting.kind === "gone") {
+      if (where.every((index) => index < 0)) return "done";
+      if (moved) return "broken";
+    } else if (where.some((index) => index < 0)) {
+      return "broken";
+    } else if (moved) {
+      return "done";
+    }
+
+    return this.#holds(STEPS[this.#at]) ? "waiting" : "broken";
+  }
+
+  /**
+   * Reads the board after every move it makes, and moves the lesson on when it is time.
    *
    * The next step is asked for on the board as it stands *after* the cells have fallen, not as it
    * stood when they popped — so this waits for the board to have closed over the gap.
@@ -277,12 +328,12 @@ class Tutorial {
     if (!this.#running || waiting === null) return;
     if (game.popping.size > 0) return;
 
-    if (waiting.kind === "gone") {
-      const there = new Set(game.cells.map((cell) => cell.id));
-      if (waiting.ids.some((id) => there.has(id))) return;
-    } else {
-      const at = (id: number) => game.cells.findIndex((cell) => cell.id === id);
-      if (waiting.ids.every((id, i) => at(id) === waiting.at[i])) return;
+    const standing = this.#judge(waiting);
+    if (standing === "waiting") return;
+    if (standing === "broken") {
+      this.#relay();
+      this.#emit();
+      return;
     }
 
     this.#awaiting = null;
