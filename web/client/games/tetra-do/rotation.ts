@@ -285,13 +285,13 @@ export function reducedLength(ops: readonly Op[]): number {
  * The allowance is spent in moves, not in cells, so a cancelling pair is free. That is the same
  * bargain the score already offers — a pair turns the solid and turns it back, so there is nothing
  * for either to count — and it makes the bridge one rule instead of two. It is not free of cost,
- * though: re-measuring the two ways of counting side by side, a wanderer scores on 36% of its
- * walks rather than 22%, and takes 2.1 cells a walk rather than 1.2. What it does not get back is
+ * though: re-measuring the two ways of counting side by side, a wanderer scores on 35% of its
+ * walks rather than 22%, and takes 2.0 cells a walk rather than 1.2. What it does not get back is
  * the thing this limit exists for. Its rate of clears of twelve or more does not move at all, and
- * stays an order of magnitude under what no limit gives it, because a cancellation can rescue a
- * wanderer that overshot by one but cannot carry it anywhere. A player who chains short answers is
- * untouched. Tightening this to five would buy most of the difference back (28%, 1.4) at almost no
- * cost to the reader; four starts taking real money off them.
+ * stays an order of magnitude under what no limit gives it, because a cancellation saves a move
+ * that has not been spent yet — it cannot buy back one that has. A player who chains short answers
+ * is untouched. Tightening this to five would buy most of the difference back (27%, 1.3) at almost
+ * no cost to the reader; four starts taking real money off them.
  *
  * Six, and the reason is not that it scored best of the numbers tried. Raising this does nothing
  * for a player once it passes how far ahead they can actually see: a player who reads five cells
@@ -412,7 +412,6 @@ function overrunOf(ops: readonly Op[]): Overrun | null {
  */
 export function chain(ops: readonly Op[]): Chain {
   let last = 0;
-  let broken = false;
   let closings = 0;
 
   for (let k = MIN_REDUCED_LENGTH; k <= ops.length; k++) {
@@ -422,25 +421,18 @@ export function chain(ops: readonly Op[]): Chain {
     ) {
       continue;
     }
-    // One measure does both jobs: what the stretch is worth is what it costs.
-    const span = reducedLength(ops.slice(last, k));
-    if (span > MAX_OPEN) broken = true;
-    if (span >= MIN_REDUCED_LENGTH) closings += 1;
+    // A stretch is worth what survives the reduction, and it costs the same thing: one measure
+    // for both. Going over the allowance is not checked here — a stretch cannot close one over
+    // without having stood at the limit, open, a move earlier, and `overrunOf` catches that.
+    if (reducedLength(ops.slice(last, k)) >= MIN_REDUCED_LENGTH) closings += 1;
     last = k;
   }
 
-  // An open run that has spent the allowance is broken there and then, not one move later. Closing
-  // on `MAX_OPEN` is fine — the loop above lets it through — but once the allowance is gone every
-  // move that is not a cancellation puts the stretch over, and a cancellation cannot close.
-  const since = reducedLength(ops.slice(last));
-  const spoiled = broken || since >= MAX_OPEN;
-  // Only while it is actually spoiled. A finger that backs out of an overrun takes the moves out
-  // of the count with it, and a trace that is good again should not still be carrying a mark
-  // saying where it once was not.
+  const overrun = overrunOf(ops);
   return {
-    since,
-    broken: spoiled,
+    since: reducedLength(ops.slice(last)),
+    broken: overrun !== null,
     closings,
-    overrun: spoiled ? overrunOf(ops) : null,
+    overrun,
   };
 }

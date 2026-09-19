@@ -758,18 +758,12 @@ export class TetraDo {
       this.#leaving(index)
     ) return;
 
-    // Where the line stops, the trace stops. Past the cell the allowance ran out on there is
-    // nothing for the board to draw, and a trace that went on growing under an undrawn line would
-    // have to be backed out of from memory — the finger retracing a path nothing on screen is
-    // showing it. So a move that would leave the trace broken is not taken at all.
-    //
-    // A move that brings the count back down still is. That one the board can draw: it un-breaks
-    // the trace, and the whole line comes back with it. Which is also why this asks what the move
-    // would leave behind rather than refusing everything — at a dead end the cells that answer
-    // are the way out of it.
-    if (this.broken && chain([...this.word, this.#cells[index].op]).broken) {
-      return;
-    }
+    // Where the line stops, the trace stops. A stretch that has spent the allowance cannot spend
+    // its way out of it — no move it makes from here can bring it home inside six — so the trace
+    // takes none, and the only way on is the way back. Letting it grow instead would grow it
+    // under an undrawn line, and a path nothing on screen is showing is one the finger would have
+    // to retrace from memory.
+    if (this.broken) return;
 
     this.#path.push(index);
     // The ladder climbs with what the trace is worth, not with how long it is: a move that
