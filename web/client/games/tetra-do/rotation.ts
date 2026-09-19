@@ -281,8 +281,18 @@ export function reducedLength(ops: readonly Op[]): number {
  * a player who chains short clears comes away with *more* than today: the long trace stops being
  * one long guess and becomes several short answers, taken without lifting the finger.
  *
- * Six rather than five or four because five already costs the reading player a cell and four costs
- * three; six leaves every trace anyone finds on purpose untouched and refuses only the wandering.
+ * Six, and the reason is not that it scored best of the numbers tried. Raising this does nothing
+ * for a player once it passes how far ahead they can actually see: a player who reads five cells
+ * ahead comes away with the same 12.8 at five, six, seven or eight, because the rule stopped being
+ * the thing holding them back. It keeps paying the wanderer the whole way up, though — 0.9 at
+ * five, 1.4 at six, 2.1 at seven, 2.7 at eight. Every cell above a player's reach is a gift to the
+ * one who is not looking.
+ *
+ * So it should sit at the reach, and this game has already named that: `hint.ts` searches five
+ * deep, because five is what the walkthrough is willing to ask someone to hold in their head. Six
+ * is that plus one — nothing for the ordinary reader, a reward for the player who sees one cell
+ * further, and only 0.5 of a cell handed to the wanderer. Seven buys headroom almost nobody has
+ * and pays for it at half again the wanderer's rate.
  */
 export const MAX_OPEN = 6;
 
