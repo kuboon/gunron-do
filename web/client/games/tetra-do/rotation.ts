@@ -263,3 +263,65 @@ export function freeReduction(
 export function reducedLength(ops: readonly Op[]): number {
   return freeReduction(ops).length;
 }
+
+/**
+ * How far a trace may go without the solid coming home.
+ *
+ * The one rule that makes length mean anything. Without it, a long trace is free: the solid turns
+ * under your finger, so you can wander and lift when the `e` comes back round — and it comes back
+ * round on its own, because there are only twelve orientations to be in. Measured, a player who
+ * reads nothing averages a 7-cell clear and lands 12 or more a third of the time, which is most of
+ * what a player who reads the board gets.
+ *
+ * The obvious fix — *a long trace must pass through home somewhere* — is the wrong way round: the
+ * longer the wander, the likelier it already does, so the rule waves the long ones through (83% of
+ * 24-cell wanders) and only catches the middling ones. This is the other way round. Wander seven
+ * cells without closing and the trace is dead, so every extra cell has to be part of something
+ * that closes. A wanderer's 12-cell traces survive 13% of the time and its 18-cell ones 3%, while
+ * a player who chains short clears comes away with *more* than today: the long trace stops being
+ * one long guess and becomes several short answers, taken without lifting the finger.
+ *
+ * Six rather than five or four because five already costs the reading player a cell and four costs
+ * three; six leaves every trace anyone finds on purpose untouched and refuses only the wandering.
+ */
+export const MAX_OPEN = 6;
+
+/** Where a trace stands against {@link MAX_OPEN}. */
+export interface Chain {
+  /** Cells since the solid was last home. */
+  since: number;
+  /** Whether it has already gone too far to count, wherever the finger stops. */
+  broken: boolean;
+}
+
+/**
+ * How a trace stands as a chain of closings.
+ *
+ * Home means what it means everywhere else in the game: the solid is back *and* enough of the
+ * trace survived the free reduction to be an answer. So `a a⁻¹` is not a place to start counting
+ * again from, which is the same thing the board says by drawing that pair dim.
+ *
+ * Broken is permanent going forward — no cell added later can shorten a gap already too long — but
+ * a finger that retraces its own path un-breaks it, because the gap goes away with the cells.
+ *
+ * @param ops The moves, in trace order
+ * @returns Where the last closing was, and whether the chain is already spoiled
+ */
+export function chain(ops: readonly Op[]): Chain {
+  let last = 0;
+  let broken = false;
+
+  for (let k = MIN_REDUCED_LENGTH; k <= ops.length; k++) {
+    const prefix = ops.slice(0, k);
+    if (
+      reducedLength(prefix) < MIN_REDUCED_LENGTH || !isIdentity(compose(prefix))
+    ) {
+      continue;
+    }
+    if (k - last > MAX_OPEN) broken = true;
+    last = k;
+  }
+
+  const since = ops.length - last;
+  return { since, broken: broken || since > MAX_OPEN };
+}

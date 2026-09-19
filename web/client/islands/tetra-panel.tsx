@@ -159,6 +159,7 @@ export const TetraPanel = clientEntry(
                 <code>a</code> <code>a⁻¹</code>{" "}
                 のような単純な打ち消しはスコアになりません
               </li>
+              <li>6マス以内に一度は戻さないと、その道は無効です</li>
               <li>ダブルタップで1マス消せます</li>
             </ul>
             {

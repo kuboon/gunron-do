@@ -141,6 +141,7 @@ export const TetraBoard = clientEntry(
       // a trace that is all cancellation looks like what it is before the finger comes up.
       const { cancelled } = freeReduction(game.word);
 
+      const broken = game.broken;
       const shake = game.shake;
       const burst = game.burst;
       const hint = game.hint;
@@ -255,11 +256,18 @@ export const TetraBoard = clientEntry(
                     sparks(cell, burst, center(cell.index), cellSize())
                   )}
                 {path.slice(1).map((to, step) => {
-                  const from = center(path[step]);
                   // Both ends, not either: the step from a move that counts into one that does not
                   // is still the trace going somewhere. Only the link between two struck-out moves
                   // is the part that adds nothing.
-                  const dead = cancelled[step] && cancelled[step + 1];
+                  //
+                  // A trace that has gone too far without coming home is all of it that part. It
+                  // cannot clear whatever happens next, and the player has to be able to see that
+                  // while the finger is still down — a rule you only meet on lifting is a rule you
+                  // cannot play around. Same dim dashed line as a cancellation, because it is the
+                  // same sentence: this is worth nothing.
+                  const from = center(path[step]);
+                  const dead = broken ||
+                    (cancelled[step] && cancelled[step + 1]);
                   const [x2, y2] = center(to);
                   return (
                     <line
