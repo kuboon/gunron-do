@@ -1,8 +1,8 @@
 /**
- * Score, longest trace, and the time running out — and what it looks like when one of them moves.
+ * Score, combo, and the time running out — and what it looks like when one of them moves.
  *
  * The board used to explain itself in a line of prose underneath it. It does not any more, so the
- * numbers carry it: a clear throws `+25` off the score, and beating the longest trace throws the
+ * numbers carry it: a clear throws `+25` off the score, and beating the best combo throws the
  * new length off that one. What each of them does is say *where* it happened, which a line of
  * text under the board could not.
  *
@@ -60,7 +60,7 @@ export const TetraHud = clientEntry(
       const depth = 1 - remaining / URGENT_MS;
 
       const cleared = age(game.clearedPop, now);
-      const longest = age(game.longestPop, now);
+      const combo = age(game.comboPop, now);
 
       return (
         <div mix={[hudStyle, ...refuseDoubleTap()]}>
@@ -86,16 +86,16 @@ export const TetraHud = clientEntry(
             </span>
 
             <span mix={statStyle}>
-              最長
-              <b mix={valueStyle} style={{ transform: bump(longest) }}>
-                {game.longest}
+              コンボ
+              <b mix={valueStyle} style={{ transform: bump(combo) }}>
+                {game.combo}
               </b>
-              {longest === null ? null : (
+              {combo === null ? null : (
                 <span
                   mix={[popStyle, popLeftStyle]}
-                  style={{ ...float(longest, -0.5), color: OP_COLORS[0] }}
+                  style={{ ...float(combo, -0.5), color: OP_COLORS[0] }}
                 >
-                  {game.longestPop?.text}
+                  {game.comboPop?.text}
                 </span>
               )}
             </span>
@@ -236,7 +236,7 @@ const popStyle = css({
   transformOrigin: "left bottom",
 });
 
-/** The same, on the other side: the longest trace sits at the right edge of the row. */
+/** The same, on the other side: the combo sits at the right edge of the row. */
 const popLeftStyle = css({
   left: "auto",
   right: "calc(100% + 0.4rem)",

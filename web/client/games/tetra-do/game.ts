@@ -45,6 +45,7 @@ export interface Noises {
   step(depth: number): void;
   back(depth: number): void;
   clear(length: number): void;
+  swap(): void;
   cancel(): void;
   tick(seconds: number): void;
   over(): void;
@@ -55,6 +56,7 @@ const SILENCE: Noises = {
   step() {},
   back() {},
   clear() {},
+  swap() {},
   cancel() {},
   tick() {},
   over() {},
@@ -89,7 +91,7 @@ export type Phase = "ready" | "teaching" | "counting" | "playing" | "over";
  * A number that just moved, for the HUD to make a fuss about.
  *
  * The board used to say what happened in a line of prose under it. It says it with the numbers
- * now: the score and the longest trace jump when they change. One of these is what makes that
+ * now: the score and the combo jump when they change. One of these is what makes that
  * happen — the text to float, and when, so the HUD can work out how far along the animation is on
  * the frame it is drawing.
  */
@@ -199,9 +201,6 @@ const HIT_STOP_MS = { medium: 60, large: 110 } as const;
 /** A trace long enough to be worth the full treatment. */
 const LARGE_CLEAR = 5;
 
-/** Two taps on one cell within this long are one gesture: erase it. */
-const DOUBLE_TAP_MS = 320;
-
 /** A seeded generator, so a date can be a board. */
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -231,8 +230,8 @@ export class TetraDo {
 
   /** How many cells have been taken off the board by a trace that counted. */
   #cleared = 0;
-  /** The longest counted trace, in cells. */
-  #longest = 0;
+  /** The most answers one pass was made of. */
+  #combo = 0;
   /** How many traces came home. */
   #solved = 0;
   #timeLeft = ROUND_MS;
@@ -240,11 +239,7 @@ export class TetraDo {
   #leadIn = 0;
   #phase: Phase = "ready";
   #clearedPop: Pop | null = null;
-  #longestPop: Pop | null = null;
-  /** The last single-cell tap, for spotting the second one. */
-  #lastTap: { index: number; at: number } | null = null;
-  /** Whether the gesture in progress has ever been more than one cell, and so is not a tap. */
-  #dragged = false;
+  #comboPop: Pop | null = null;
   /** Cells the walkthrough is pointing at, for the board to ring. */
   #hint: readonly number[] = [];
   #popId = 0;
@@ -428,9 +423,16 @@ export class TetraDo {
   get cleared(): number {
     return this.#cleared;
   }
-  /** The longest counted trace, in cells. */
-  get longest(): number {
-    return this.#longest;
+  /**
+   * The most answers one pass was made of.
+   *
+   * The number that took the longest trace's place. Length stopped being the thing worth counting
+   * once it had to be a chain of closings anyway — a fourteen-cell trace is four answers, and
+   * *four* is what the player did. Eight is the ceiling: an answer is three cells at the least,
+   * and there are twenty-five cells.
+   */
+  get combo(): number {
+    return this.#combo;
   }
   /** How many traces came home. */
   get solved(): number {
@@ -446,9 +448,9 @@ export class TetraDo {
   get clearedPop(): Pop | null {
     return this.#clearedPop;
   }
-  /** The last time the longest trace was beaten. */
-  get longestPop(): Pop | null {
-    return this.#longestPop;
+  /** The last time the best combo was beaten. */
+  get comboPop(): Pop | null {
+    return this.#comboPop;
   }
   /** The sparks thrown by the cells that just cleared, or `null` between clears. */
   get burst(): Burst | null {
@@ -608,15 +610,13 @@ export class TetraDo {
     this.#fill();
     this.#path = [];
     this.#cleared = 0;
-    this.#longest = 0;
+    this.#combo = 0;
     this.#solved = 0;
-    this.#lastTap = null;
-    this.#dragged = false;
     this.#hint = [];
     this.#timeLeft = ROUND_MS;
     this.#phase = "playing";
     this.#clearedPop = null;
-    this.#longestPop = null;
+    this.#comboPop = null;
     this.#burst = null;
     this.#shake = null;
     this.#hitStop = 0;
@@ -694,7 +694,6 @@ export class TetraDo {
   #beginTrace(index: number): void {
     if (!this.#live() || this.#leaving(index)) return;
     this.#path = [index];
-    this.#dragged = false;
     this.#noises.step(0);
     this.#resetSolid();
     this.#turn(this.#cells[index].op, TURN_MS);
@@ -732,12 +731,6 @@ export class TetraDo {
       this.#leaving(index)
     ) return;
     this.#path.push(index);
-    // From here this gesture is a trace, whatever it ends up being: the finger has visibly left
-    // the cell it started on. So it is not a tap, and it breaks any tap still waiting for a
-    // partner — two taps with a trace between them are two gestures the player watched happen
-    // separately, and reading them as one double tap erases a cell nobody asked about.
-    this.#dragged = true;
-    this.#lastTap = null;
     // The ladder climbs with what the trace is worth, not with how long it is: a move that
     // cancels the one before it adds nothing to the score, so it adds nothing to the pitch —
     // and undoes the last rung, which is the same thing the dashed line says.
@@ -763,18 +756,10 @@ export class TetraDo {
     const word = this.word;
     if (word.length === 0) return;
 
-    // One cell is a tap, not a trace. Two of them on the same cell in quick succession are the
-    // way to be rid of a cell you cannot use — the one move in the game that asks nothing of the
-    // group and gives nothing back.
+    // One cell is a touch, not a trace. Nothing to judge.
     if (word.length < 2) {
-      const index = this.#path[0];
       this.#path = [];
       this.#rightSolid();
-      if (!this.#dragged && this.#doubleTapped(index)) {
-        this.#write("erase", index);
-        this.#erase(index);
-        return;
-      }
       this.#emit();
       return;
     }
@@ -789,13 +774,26 @@ export class TetraDo {
       return;
     }
 
+    // Two cells that do not cancel: they change places.
+    //
+    // The board's one move that is not an answer. It was a double tap that took a cell away, which
+    // asked nothing and gave nothing — a cell you could not use went in the bin and the column
+    // dropped a stranger in behind it. This asks something: *which two*. Both cells stay on the
+    // board, so the question is which pair is worth more the other way round, and that is read
+    // rather than tapped.
+    if (word.length === 2) {
+      this.#swap(this.#path[0], this.#path[1]);
+      return;
+    }
+
     // Home, long enough to be an answer, and closed often enough along the way. The last of the
     // three is what keeps length worth something: see `MAX_OPEN`.
+    const links = chain(word);
     if (
       isIdentity(compose(word)) && reduced >= MIN_REDUCED_LENGTH &&
-      !chain(word).broken
+      !links.broken
     ) {
-      this.#solve(reduced);
+      this.#solve(reduced, links.closings);
       return;
     }
 
@@ -803,33 +801,6 @@ export class TetraDo {
     // It costs nothing but the time it took — a trace that only cancels itself, and one that
     // simply does not come home, are both just traces that are not there any more.
     this.#cancel();
-  }
-
-  /**
-   * Whether this tap is the second one on the same cell, soon enough to be one gesture.
-   *
-   * Timed on `#clock` rather than on what is left of the round. Both are the game's own time —
-   * which is what makes a recording tap twice exactly where it tapped twice — but the round's
-   * clock does not run during a lesson, and a window measured against a clock that is not moving
-   * is not a window: there, every second tap on a cell was the second half of a double tap,
-   * however long ago and whatever else had happened in between. `#clock` moves in every phase.
-   *
-   * A replay never asks: the erase is in the recording as itself, and asking again would double
-   * it.
-   *
-   * @param index The cell that was tapped
-   */
-  #doubleTapped(index: number): boolean {
-    if (this.#replaying || this.#leaving(index)) return false;
-    const at = this.#clock;
-    const last = this.#lastTap;
-    this.#lastTap = { index, at };
-    if (last === null || last.index !== index) return false;
-    if (at - last.at > DOUBLE_TAP_MS) return false;
-    // Spent: a third tap starts a new pair rather than erasing again.
-    this.#lastTap = null;
-    this.#hint = [];
-    return true;
   }
 
   /** Whether a cell is mid-clear, and so not part of the board any more. */
@@ -857,17 +828,22 @@ export class TetraDo {
    *
    * @param reduced The trace's length with the cancellations taken out
    */
-  #solve(reduced: number): void {
-    const tier = reduced >= LARGE_CLEAR ? "large" : "medium";
-    const record = reduced > this.#longest;
+  #solve(reduced: number, closings: number): void {
+    // A pass made of more than one answer earns the full treatment whatever its length: chaining
+    // is the thing the game now asks for, so it is the thing the board should shout about.
+    const tier = closings >= 2 || reduced >= LARGE_CLEAR ? "large" : "medium";
+    const record = closings > this.#combo;
 
-    this.#solved += 1;
+    // Each answer counts, not each pass. A fourteen-cell trace that came home four times on the
+    // way is four answers taken in one go, and saying "1" would be counting the gesture rather
+    // than what it did.
+    this.#solved += closings;
     this.#cleared += reduced;
-    this.#longest = Math.max(this.#longest, reduced);
+    this.#combo = Math.max(this.#combo, closings);
     this.#clearedPop = this.#pop(`+${reduced}`);
-    // An arrow rather than the bare number: beside a number that already says `6`, a floating
-    // `6` reads as a second count rather than as the one that just moved.
-    if (record) this.#longestPop = this.#pop(`↑${reduced}`);
+    // An arrow rather than the bare number: beside a number that already says `4`, a floating
+    // `4` reads as a second count rather than as the one that just moved.
+    if (record) this.#comboPop = this.#pop(`↑${closings}`);
     this.#queue.push({ kind: "flash" });
 
     this.#burst = {
@@ -916,10 +892,44 @@ export class TetraDo {
    *
    * @param index The cell to take
    */
+  /**
+   * Takes one cell off the board.
+   *
+   * Nothing a player can do any more: a double tap used to erase a cell, and the swap replaced it.
+   * It stays because recordings do. A link someone sent before the change still carries `erase`
+   * moves, and a replay that quietly skipped them would run every later move against a board that
+   * had drifted — the round would not be the round. What the numbers come to has already moved
+   * with the rules, which is a different and unavoidable thing; the board at least still does what
+   * it did.
+   *
+   * @param index The cell to take
+   */
   #erase(index: number): void {
     if (!this.#live() || this.#leaving(index)) return;
     this.#noises.back(1);
     this.#take([index]);
+    this.#emit();
+  }
+
+  /**
+   * Two cells change places.
+   *
+   * The cells move rather than their letters, so each keeps the identity the board draws it by and
+   * the two are seen to cross — `animateLayout` slides them past each other, which is the whole of
+   * the animation. Swapping the letters instead would have them blink into each other's clothes.
+   *
+   * It scores nothing. The board is different afterwards, which is the point and the payment.
+   *
+   * @param a One cell
+   * @param b The other, next to it
+   */
+  #swap(a: number, b: number): void {
+    this.#path = [];
+    this.#rightSolid();
+    if (!this.#leaving(a) && !this.#leaving(b)) {
+      [this.#cells[a], this.#cells[b]] = [this.#cells[b], this.#cells[a]];
+      this.#noises.swap();
+    }
     this.#emit();
   }
 
@@ -1163,7 +1173,7 @@ export const game: TetraDo = new TetraDo();
 export interface Outcome {
   cleared: number;
   solved: number;
-  longest: number;
+  combo: number;
 }
 
 /**
@@ -1182,5 +1192,5 @@ export function outcome(date: string, moves: readonly Move[]): Outcome {
   const run = new TetraDo(SILENCE);
   run.startReplay(date, moves);
   run.runToEnd();
-  return { cleared: run.cleared, solved: run.solved, longest: run.longest };
+  return { cleared: run.cleared, solved: run.solved, combo: run.combo };
 }

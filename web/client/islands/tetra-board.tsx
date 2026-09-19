@@ -15,10 +15,11 @@
  * would slide into it and back out again.
  *
  * The line the finger leaves is the one place the scoring is visible while it can still be
- * changed. A move that cancels its neighbour is worth nothing, so its cell loses its highlight and
- * the link between the two struck-out moves goes thin, dim and dashed — a trace that is nothing
- * but cancellation looks like nothing before the finger comes up, which is the moment it is still
- * worth knowing.
+ * changed, which is the moment it is worth knowing. It says three things. A link that counts is
+ * the full line. A link between two moves that cancel each other is a bridge — it scores nothing,
+ * it costs nothing against the six, and it gets the finger across — so it is drawn hollow, as two
+ * rails with the road missing, and its cells keep their own surface. A trace that has gone too
+ * far to come home is the other one: thin, dim and dashed, all the way along.
  *
  * What it reads is the game; what it writes is three calls on it. No rule is decided here.
  */
@@ -180,9 +181,10 @@ export const TetraBoard = clientEntry(
               }),
               // A long press on a phone would otherwise offer to select the board.
               on("contextmenu", (event) => event.preventDefault()),
-              // And a double tap would otherwise offer to zoom in on it, which on a board whose
-              // own double tap erases a cell is the browser reading the player's gesture as its
-              // own. `refuseDoubleTap` is the whole of the answer.
+              // And a double tap would otherwise offer to zoom in on it. Nothing in the game
+              // answers to one any more, but a board is still a thing fingers land on twice in
+              // quick succession, and the zoom that follows is the browser answering a question
+              // nobody asked. `refuseDoubleTap` is the whole of it.
               ...refuseDoubleTap(),
             ]}
           >
@@ -256,22 +258,50 @@ export const TetraBoard = clientEntry(
                     sparks(cell, burst, center(cell.index), cellSize())
                   )}
                 {path.slice(1).map((to, step) => {
-                  // Both ends, not either: the step from a move that counts into one that does not
-                  // is still the trace going somewhere. Only the link between two struck-out moves
-                  // is the part that adds nothing.
+                  // Three things a link can be, and the line says which.
                   //
-                  // A trace that has gone too far without coming home is all of it that part. It
-                  // cannot clear whatever happens next, and the player has to be able to see that
-                  // while the finger is still down — a rule you only meet on lifting is a rule you
-                  // cannot play around. Same dim dashed line as a cancellation, because it is the
-                  // same sentence: this is worth nothing.
+                  // A trace that has gone too far without coming home is dead, whatever it does
+                  // next, and the player has to see that while the finger is still down — a rule
+                  // you only meet on lifting is a rule you cannot play around. Dim, thin, dashed:
+                  // cut.
+                  //
+                  // Both ends, not either: the step from a move that counts into one that does
+                  // not is still the trace going somewhere. Only the link between two struck-out
+                  // moves is a bridge — it scores nothing and costs nothing, and it carries the
+                  // finger to the other side. So it is drawn as the road's two edges without the
+                  // road: unbroken, because it connects, and hollow, because nothing of it counts.
                   const from = center(path[step]);
-                  const dead = broken ||
-                    (cancelled[step] && cancelled[step + 1]);
+                  const dead = broken;
+                  const bridging = !dead && cancelled[step] &&
+                    cancelled[step + 1];
                   const [x2, y2] = center(to);
+                  const key = `${path[step]}-${to}`;
+                  if (bridging) {
+                    // Perpendicular to the step, so the two rails stay a rail's width apart
+                    // whichever way the finger went.
+                    const [dx, dy] = [x2 - from[0], y2 - from[1]];
+                    const run = Math.hypot(dx, dy) || 1;
+                    const [nx, ny] = [
+                      (-dy / run) * cellSize() * 0.05,
+                      (dx / run) * cellSize() * 0.05,
+                    ];
+                    return [1, -1].map((side) => (
+                      <line
+                        key={`${key}-${side}`}
+                        x1={from[0] + nx * side}
+                        y1={from[1] + ny * side}
+                        x2={x2 + nx * side}
+                        y2={y2 + ny * side}
+                        stroke={ink.muted}
+                        stroke-opacity={0.55}
+                        stroke-width={Math.max(2, cellSize() * 0.035)}
+                        stroke-linecap="round"
+                      />
+                    ));
+                  }
                   return (
                     <line
-                      key={`${path[step]}-${to}`}
+                      key={key}
                       x1={from[0]}
                       y1={from[1]}
                       x2={x2}
@@ -516,7 +546,8 @@ const faceStyle = css({
   background: surface.cell,
   // On the face rather than on the cell around it, because that one is what `animateLayout` moves
   // — two transforms on one element, and the one that does not know about the other wins.
-  transition: "transform 120ms, background 120ms, opacity 200ms",
+  transition:
+    "transform 120ms, background 120ms, box-shadow 120ms, opacity 200ms",
 });
 
 const faceTracedStyle = css({
@@ -524,11 +555,20 @@ const faceTracedStyle = css({
   background: surface.cellActive,
 });
 
-/** Traced, but undone by a neighbour: in the trace and worth nothing. */
+/**
+ * Traced, but undone by a neighbour: stepped on, not taken.
+ *
+ * It keeps the cell's own surface rather than sinking to the board's. A cell the trace cancelled
+ * is a pier the finger crossed, not a hole it fell through — and it is still there to be used
+ * afterwards, which a hole would not be.
+ */
 const faceCancelledStyle = css({
   transform: "scale(0.9)",
-  background: surface.board,
-  opacity: 0.55,
+  background: surface.cell,
+  // The same hollow the line is drawn with: an outline where a filled cell would be, so the cell
+  // and the link across it say one thing rather than two.
+  boxShadow: `inset 0 0 0 2px ${ink.muted}`,
+  opacity: 0.8,
 });
 
 /** Cleared, and shrinking away in the slot it still holds. */

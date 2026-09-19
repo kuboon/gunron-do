@@ -159,8 +159,10 @@ export const TetraPanel = clientEntry(
                 <code>a</code> <code>a⁻¹</code>{" "}
                 のような単純な打ち消しはスコアになりません
               </li>
-              <li>6マス以内に一度は戻さないと、その道は無効です</li>
-              <li>ダブルタップで1マス消せます</li>
+              <li>
+                6手以内に一度は戻さないと、その道は無効です（打ち消しは数えません）
+              </li>
+              <li>2マスなぞると、その2マスが入れ替わります</li>
             </ul>
             {
               /*
@@ -214,7 +216,7 @@ export const TetraPanel = clientEntry(
             {scoreboard({
               cleared: game.cleared,
               solved: game.solved,
-              longest: game.longest,
+              combo: game.combo,
             })}
             <div mix={buttonsStyle}>
               {game.replaying
@@ -324,8 +326,8 @@ function scoreboard(result: Outcome) {
         <dd>{result.solved}</dd>
       </div>
       <div>
-        <dt>最長</dt>
-        <dd>{result.longest}</dd>
+        <dt>コンボ</dt>
+        <dd>{result.combo}</dd>
       </div>
     </dl>
   );

@@ -275,11 +275,23 @@ export function reducedLength(ops: readonly Op[]): number {
  *
  * The obvious fix — *a long trace must pass through home somewhere* — is the wrong way round: the
  * longer the wander, the likelier it already does, so the rule waves the long ones through (83% of
- * 24-cell wanders) and only catches the middling ones. This is the other way round. Wander seven
- * cells without closing and the trace is dead, so every extra cell has to be part of something
- * that closes. A wanderer's 12-cell traces survive 13% of the time and its 18-cell ones 3%, while
- * a player who chains short clears comes away with *more* than today: the long trace stops being
- * one long guess and becomes several short answers, taken without lifting the finger.
+ * 24-cell wanders) and only catches the middling ones. This is the other way round. Wander six
+ * moves without closing and the trace is dead where it stands, so every further move has to be
+ * part of something that closes. A wanderer's 12-cell traces survive 13% of the time and its 18-cell
+ * ones 3%, while a player who chains short clears comes away with *more* than today: the long
+ * trace stops being one long guess and becomes several short answers, taken without lifting the
+ * finger.
+ *
+ * The allowance is spent in moves, not in cells, so a cancelling pair is free. That is the same
+ * bargain the score already offers — a pair turns the solid and turns it back, so there is nothing
+ * for either to count — and it makes the bridge one rule instead of two. It is not free of cost,
+ * though: re-measuring the two ways of counting side by side, a wanderer scores on 36% of its
+ * walks rather than 22%, and takes 2.1 cells a walk rather than 1.2. What it does not get back is
+ * the thing this limit exists for. Its rate of clears of twelve or more does not move at all, and
+ * stays an order of magnitude under what no limit gives it, because a cancellation can rescue a
+ * wanderer that overshot by one but cannot carry it anywhere. A player who chains short answers is
+ * untouched. Tightening this to five would buy most of the difference back (28%, 1.4) at almost no
+ * cost to the reader; four starts taking real money off them.
  *
  * Six, and the reason is not that it scored best of the numbers tried. Raising this does nothing
  * for a player once it passes how far ahead they can actually see: a player who reads five cells
@@ -298,10 +310,33 @@ export const MAX_OPEN = 6;
 
 /** Where a trace stands against {@link MAX_OPEN}. */
 export interface Chain {
-  /** Cells since the solid was last home. */
+  /**
+   * Moves since the solid was last home, after the free reduction.
+   *
+   * Cells the trace cancelled out again are not in it. Walking `a` and then `a⁻¹` costs two cells
+   * and two cells' worth of clock, and leaves this where it was.
+   */
   since: number;
-  /** Whether it has already gone too far to count, wherever the finger stops. */
+  /**
+   * Whether it has already gone too far to count, wherever the finger stops.
+   *
+   * A stretch that has spent {@link MAX_OPEN} moves without closing is already spoiled, not one
+   * move away from it: the next closing would be one over the limit, and so would every closing
+   * after that. The board says so on the sixth move rather than the seventh, because the sixth is
+   * where the trace stopped being worth carrying forward.
+   */
   broken: boolean;
+  /**
+   * How many answers the trace is made of.
+   *
+   * One per stretch between closings that survives the free reduction as three moves or more. A
+   * stretch that is nothing but a cancelling pair brings the solid home and is a fine place to
+   * carry on from, but it is not an answer and is not counted — which is what stops a player
+   * padding a combo with `a a⁻¹` over and over.
+   *
+   * Three cells is the least an answer can be, so twenty-five cells hold at most eight of them.
+   */
+  closings: number;
 }
 
 /**
@@ -311,8 +346,17 @@ export interface Chain {
  * trace survived the free reduction to be an answer. So `a a⁻¹` is not a place to start counting
  * again from, which is the same thing the board says by drawing that pair dim.
  *
- * Broken is permanent going forward — no cell added later can shorten a gap already too long — but
- * a finger that retraces its own path un-breaks it, because the gap goes away with the cells.
+ * The allowance is spent in moves that survive the free reduction, not in cells. A cancelling
+ * pair turns the solid and turns it back, so it costs the player two cells and the clock the time
+ * to walk them, and it leaves the orientation exactly where it was — there is nothing for the
+ * limit to catch. It is the same accounting the score already uses, and it makes the bridge one
+ * thing everywhere rather than a trick that only works after the first answer.
+ *
+ * A finger that retraces its own path un-breaks the trace, because the moves it undoes go out of
+ * the count with it. Backing out is in fact the only way out: cancelling never lands on home,
+ * since every orientation it passes through is one the trace already stood on and did not close
+ * at. So a trace that has spent the allowance has to spend cells undoing before it can spend any
+ * going forward.
  *
  * @param ops The moves, in trace order
  * @returns Where the last closing was, and whether the chain is already spoiled
@@ -320,6 +364,7 @@ export interface Chain {
 export function chain(ops: readonly Op[]): Chain {
   let last = 0;
   let broken = false;
+  let closings = 0;
 
   for (let k = MIN_REDUCED_LENGTH; k <= ops.length; k++) {
     const prefix = ops.slice(0, k);
@@ -328,10 +373,16 @@ export function chain(ops: readonly Op[]): Chain {
     ) {
       continue;
     }
-    if (k - last > MAX_OPEN) broken = true;
+    // One measure does both jobs: what the stretch is worth is what it costs.
+    const span = reducedLength(ops.slice(last, k));
+    if (span > MAX_OPEN) broken = true;
+    if (span >= MIN_REDUCED_LENGTH) closings += 1;
     last = k;
   }
 
-  const since = ops.length - last;
-  return { since, broken: broken || since > MAX_OPEN };
+  // An open run that has spent the allowance is broken there and then, not one move later. Closing
+  // on `MAX_OPEN` is fine — the loop above lets it through — but once the allowance is gone every
+  // move that is not a cancellation puts the stretch over, and a cancellation cannot close.
+  const since = reducedLength(ops.slice(last));
+  return { since, broken: broken || since >= MAX_OPEN, closings };
 }
