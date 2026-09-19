@@ -45,6 +45,7 @@ export interface Noises {
   step(depth: number): void;
   back(depth: number): void;
   clear(length: number): void;
+  swap(): void;
   cancel(): void;
   tick(seconds: number): void;
   over(): void;
@@ -55,6 +56,7 @@ const SILENCE: Noises = {
   step() {},
   back() {},
   clear() {},
+  swap() {},
   cancel() {},
   tick() {},
   over() {},
@@ -199,9 +201,6 @@ const HIT_STOP_MS = { medium: 60, large: 110 } as const;
 /** A trace long enough to be worth the full treatment. */
 const LARGE_CLEAR = 5;
 
-/** Two taps on one cell within this long are one gesture: erase it. */
-const DOUBLE_TAP_MS = 320;
-
 /** A seeded generator, so a date can be a board. */
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -241,10 +240,6 @@ export class TetraDo {
   #phase: Phase = "ready";
   #clearedPop: Pop | null = null;
   #longestPop: Pop | null = null;
-  /** The last single-cell tap, for spotting the second one. */
-  #lastTap: { index: number; at: number } | null = null;
-  /** Whether the gesture in progress has ever been more than one cell, and so is not a tap. */
-  #dragged = false;
   /** Cells the walkthrough is pointing at, for the board to ring. */
   #hint: readonly number[] = [];
   #popId = 0;
@@ -610,8 +605,6 @@ export class TetraDo {
     this.#cleared = 0;
     this.#longest = 0;
     this.#solved = 0;
-    this.#lastTap = null;
-    this.#dragged = false;
     this.#hint = [];
     this.#timeLeft = ROUND_MS;
     this.#phase = "playing";
@@ -694,7 +687,6 @@ export class TetraDo {
   #beginTrace(index: number): void {
     if (!this.#live() || this.#leaving(index)) return;
     this.#path = [index];
-    this.#dragged = false;
     this.#noises.step(0);
     this.#resetSolid();
     this.#turn(this.#cells[index].op, TURN_MS);
@@ -732,12 +724,6 @@ export class TetraDo {
       this.#leaving(index)
     ) return;
     this.#path.push(index);
-    // From here this gesture is a trace, whatever it ends up being: the finger has visibly left
-    // the cell it started on. So it is not a tap, and it breaks any tap still waiting for a
-    // partner — two taps with a trace between them are two gestures the player watched happen
-    // separately, and reading them as one double tap erases a cell nobody asked about.
-    this.#dragged = true;
-    this.#lastTap = null;
     // The ladder climbs with what the trace is worth, not with how long it is: a move that
     // cancels the one before it adds nothing to the score, so it adds nothing to the pitch —
     // and undoes the last rung, which is the same thing the dashed line says.
@@ -763,18 +749,10 @@ export class TetraDo {
     const word = this.word;
     if (word.length === 0) return;
 
-    // One cell is a tap, not a trace. Two of them on the same cell in quick succession are the
-    // way to be rid of a cell you cannot use — the one move in the game that asks nothing of the
-    // group and gives nothing back.
+    // One cell is a touch, not a trace. Nothing to judge.
     if (word.length < 2) {
-      const index = this.#path[0];
       this.#path = [];
       this.#rightSolid();
-      if (!this.#dragged && this.#doubleTapped(index)) {
-        this.#write("erase", index);
-        this.#erase(index);
-        return;
-      }
       this.#emit();
       return;
     }
@@ -786,6 +764,18 @@ export class TetraDo {
     // to take those cells off the board.
     if (reduced === 0) {
       this.#undo();
+      return;
+    }
+
+    // Two cells that do not cancel: they change places.
+    //
+    // The board's one move that is not an answer. It was a double tap that took a cell away, which
+    // asked nothing and gave nothing — a cell you could not use went in the bin and the column
+    // dropped a stranger in behind it. This asks something: *which two*. Both cells stay on the
+    // board, so the question is which pair is worth more the other way round, and that is read
+    // rather than tapped.
+    if (word.length === 2) {
+      this.#swap(this.#path[0], this.#path[1]);
       return;
     }
 
@@ -803,33 +793,6 @@ export class TetraDo {
     // It costs nothing but the time it took — a trace that only cancels itself, and one that
     // simply does not come home, are both just traces that are not there any more.
     this.#cancel();
-  }
-
-  /**
-   * Whether this tap is the second one on the same cell, soon enough to be one gesture.
-   *
-   * Timed on `#clock` rather than on what is left of the round. Both are the game's own time —
-   * which is what makes a recording tap twice exactly where it tapped twice — but the round's
-   * clock does not run during a lesson, and a window measured against a clock that is not moving
-   * is not a window: there, every second tap on a cell was the second half of a double tap,
-   * however long ago and whatever else had happened in between. `#clock` moves in every phase.
-   *
-   * A replay never asks: the erase is in the recording as itself, and asking again would double
-   * it.
-   *
-   * @param index The cell that was tapped
-   */
-  #doubleTapped(index: number): boolean {
-    if (this.#replaying || this.#leaving(index)) return false;
-    const at = this.#clock;
-    const last = this.#lastTap;
-    this.#lastTap = { index, at };
-    if (last === null || last.index !== index) return false;
-    if (at - last.at > DOUBLE_TAP_MS) return false;
-    // Spent: a third tap starts a new pair rather than erasing again.
-    this.#lastTap = null;
-    this.#hint = [];
-    return true;
   }
 
   /** Whether a cell is mid-clear, and so not part of the board any more. */
@@ -916,10 +879,44 @@ export class TetraDo {
    *
    * @param index The cell to take
    */
+  /**
+   * Takes one cell off the board.
+   *
+   * Nothing a player can do any more: a double tap used to erase a cell, and the swap replaced it.
+   * It stays because recordings do. A link someone sent before the change still carries `erase`
+   * moves, and a replay that quietly skipped them would run every later move against a board that
+   * had drifted — the round would not be the round. What the numbers come to has already moved
+   * with the rules, which is a different and unavoidable thing; the board at least still does what
+   * it did.
+   *
+   * @param index The cell to take
+   */
   #erase(index: number): void {
     if (!this.#live() || this.#leaving(index)) return;
     this.#noises.back(1);
     this.#take([index]);
+    this.#emit();
+  }
+
+  /**
+   * Two cells change places.
+   *
+   * The cells move rather than their letters, so each keeps the identity the board draws it by and
+   * the two are seen to cross — `animateLayout` slides them past each other, which is the whole of
+   * the animation. Swapping the letters instead would have them blink into each other's clothes.
+   *
+   * It scores nothing. The board is different afterwards, which is the point and the payment.
+   *
+   * @param a One cell
+   * @param b The other, next to it
+   */
+  #swap(a: number, b: number): void {
+    this.#path = [];
+    this.#rightSolid();
+    if (!this.#leaving(a) && !this.#leaving(b)) {
+      [this.#cells[a], this.#cells[b]] = [this.#cells[b], this.#cells[a]];
+      this.#noises.swap();
+    }
     this.#emit();
   }
 

@@ -39,12 +39,20 @@ function neighbours(index: number): number[] {
     .map(([a, b]) => b * WIDTH + a);
 }
 
+/** A trace that comes home on its own, with no cancellation holding it up. */
+function clears(word: readonly Op[]): boolean {
+  return word.length >= MIN_REDUCED_LENGTH &&
+    reducedLength(word) === word.length && isIdentity(compose(word));
+}
+
 /** What to look for, when the shortest path is not the one wanted. */
 export interface Search {
   /** Take the longest path found rather than the shortest. */
   longest?: boolean;
   /** Columns whose top cell is unknown, and so cannot be part of the answer. */
   avoidColumns?: readonly number[];
+  /** Cells the path has to touch at least one of, when it has to be *about* something. */
+  through?: readonly number[];
 }
 
 /**
@@ -66,6 +74,7 @@ export function findClearing(
   // A column to avoid means its top cell, which is the only one that can be unknown — and in the
   // top row the cell's index is the column's number.
   const forbidden = new Set(search.avoidColumns ?? []);
+  const required = search.through;
 
   const better = (path: number[]): boolean =>
     best === null ||
@@ -77,6 +86,8 @@ export function findClearing(
 
     if (
       path.length >= MIN_REDUCED_LENGTH &&
+      (required === undefined ||
+        required.some((cell) => path.includes(cell))) &&
       reducedLength(word) === path.length &&
       isIdentity(compose(word)) &&
       better(path)
@@ -101,51 +112,49 @@ export function findClearing(
   return best;
 }
 
-/** The board after one cell is taken out of it: its column falls, and the top is new. */
-function afterErasing(ops: readonly Op[], cell: number): Op[] {
-  const x = cell % WIDTH;
-  const y = Math.floor(cell / WIDTH);
-  const next = [...ops];
-  for (let row = y; row >= 1; row--) {
-    next[row * WIDTH + x] = ops[(row - 1) * WIDTH + x];
-  }
-  // The top of that column is dealt fresh, and nothing here can know what it will be.
-  return next;
-}
-
 /**
- * A cell worth being rid of: one low enough that the fall is visible, and one that opens a path.
+ * A pair worth changing places: two neighbours whose swap opens up a path.
  *
- * The lesson is not "you may delete a cell" but what deleting one is *for* — the column drops, and
- * cells that were nowhere near each other end up side by side. So the cell is chosen by looking at
- * the board it leaves behind: the one whose going opens up the longest trace.
+ * The lesson is not "you may swap two cells" but what a swap is *for*. Both cells stay on the
+ * board — nothing is thrown away and nothing unknown arrives — so the only question a swap asks
+ * is *which two*, and the answer is whichever pair leaves the longest trace behind it. That makes
+ * it a thing to read rather than a thing to tap, which is what the move is here to be.
  *
- * The cell dealt into the top of that column is unknowable from here, so the path is found without
- * it. Whatever turns up there can only add to what is already promised.
+ * Two cells that hold the same move are skipped: swapping them is a gesture with nothing to show
+ * for it, and a lesson should not be teaching one.
  *
  * @param ops What every cell holds, by index
- * @returns The cell to be rid of, or `null` when taking one changes nothing
+ * @returns The two cells to trace, in order, or `null` when no swap opens anything
  */
-export function findErasable(ops: readonly Op[]): number | null {
-  let best: { cell: number; length: number } | null = null;
+export function findSwappable(ops: readonly Op[]): number[] | null {
+  let best: { pair: number[]; length: number } | null = null;
 
-  // From the bottom up: a cell in the top row has nothing above it to fall.
-  for (let y = HEIGHT - 1; y >= 1; y--) {
-    for (let x = 0; x < WIDTH; x++) {
-      const cell = y * WIDTH + x;
-      const path = findClearing(afterErasing(ops, cell), {
-        longest: true,
-        avoidColumns: [x],
-      });
+  for (let a = 0; a < ops.length; a++) {
+    for (const b of neighbours(a)) {
+      // Each pair once, and never two cells holding the same move: swapping those is a gesture
+      // with nothing to show for it, and a lesson should not be teaching one.
+      if (b < a || ops[a] === ops[b]) continue;
+
+      const after = [...ops];
+      [after[a], after[b]] = [after[b], after[a]];
+
+      // A path that goes through one of the two, so the swap is what it is about. Asking instead
+      // for the board's longest path to get longer does not work: the search stops at `MAX_DEPTH`,
+      // so on a board that already holds a five the answer is always no.
+      const path = findClearing(after, { longest: true, through: [a, b] });
       if (path === null) continue;
+
+      // And the same cells must not already clear the other way round, or the swap did nothing.
+      if (clears(path.map((cell) => ops[cell]))) continue;
+
       if (best === null || path.length > best.length) {
-        best = { cell, length: path.length };
+        best = { pair: [a, b], length: path.length };
       }
       // Long enough to be worth the lesson; no need to keep looking.
-      if (best.length >= MAX_DEPTH) return best.cell;
+      if (best.length >= MAX_DEPTH) return best.pair;
     }
   }
-  return best?.cell ?? null;
+  return best?.pair ?? null;
 }
 
 /**

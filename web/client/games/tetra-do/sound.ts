@@ -270,6 +270,25 @@ class Sound {
   }
 
   /** A trace that did not: short, low, and over. Nothing is lost, and it should not sound like it. */
+  /**
+   * Two cells changing places: the same short note twice, the second a tone higher.
+   *
+   * Two notes because two things moved, and rising because the board is now a little more the way
+   * the player wanted it. Quiet — it is a tidying move, not an answer.
+   */
+  swap(): void {
+    this.#play([
+      { freq: pitch(3), duration: 0.05, gain: 0.3, type: "triangle" },
+      {
+        freq: pitch(5),
+        delay: 0.06,
+        duration: 0.05,
+        gain: 0.3,
+        type: "triangle",
+      },
+    ]);
+  }
+
   cancel(): void {
     this.#play([
       { freq: 150, sweepTo: 90, duration: 0.14, gain: 0.6, type: "square" },

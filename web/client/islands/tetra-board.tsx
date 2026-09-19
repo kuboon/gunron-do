@@ -180,9 +180,10 @@ export const TetraBoard = clientEntry(
               }),
               // A long press on a phone would otherwise offer to select the board.
               on("contextmenu", (event) => event.preventDefault()),
-              // And a double tap would otherwise offer to zoom in on it, which on a board whose
-              // own double tap erases a cell is the browser reading the player's gesture as its
-              // own. `refuseDoubleTap` is the whole of the answer.
+              // And a double tap would otherwise offer to zoom in on it. Nothing in the game
+              // answers to one any more, but a board is still a thing fingers land on twice in
+              // quick succession, and the zoom that follows is the browser answering a question
+              // nobody asked. `refuseDoubleTap` is the whole of it.
               ...refuseDoubleTap(),
             ]}
           >
