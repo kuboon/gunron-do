@@ -275,11 +275,12 @@ export function reducedLength(ops: readonly Op[]): number {
  *
  * The obvious fix — *a long trace must pass through home somewhere* — is the wrong way round: the
  * longer the wander, the likelier it already does, so the rule waves the long ones through (83% of
- * 24-cell wanders) and only catches the middling ones. This is the other way round. Wander seven
- * cells without closing and the trace is dead, so every extra cell has to be part of something
- * that closes. A wanderer's 12-cell traces survive 13% of the time and its 18-cell ones 3%, while
- * a player who chains short clears comes away with *more* than today: the long trace stops being
- * one long guess and becomes several short answers, taken without lifting the finger.
+ * 24-cell wanders) and only catches the middling ones. This is the other way round. Wander six
+ * cells without closing and the trace is dead where it stands, so every extra cell has to be part
+ * of something that closes. A wanderer's 12-cell traces survive 13% of the time and its 18-cell
+ * ones 3%, while a player who chains short clears comes away with *more* than today: the long
+ * trace stops being one long guess and becomes several short answers, taken without lifting the
+ * finger.
  *
  * Six, and the reason is not that it scored best of the numbers tried. Raising this does nothing
  * for a player once it passes how far ahead they can actually see: a player who reads five cells
@@ -300,7 +301,14 @@ export const MAX_OPEN = 6;
 export interface Chain {
   /** Cells since the solid was last home. */
   since: number;
-  /** Whether it has already gone too far to count, wherever the finger stops. */
+  /**
+   * Whether it has already gone too far to count, wherever the finger stops.
+   *
+   * A run of {@link MAX_OPEN} cells that has not closed is already spoiled, not one cell away from
+   * it: the next closing would span one more than the limit allows, and so would every closing
+   * after that. The board says so on the sixth cell rather than the seventh, because the sixth is
+   * where the trace stopped being worth finishing.
+   */
   broken: boolean;
   /**
    * How many answers the trace is made of.
@@ -345,6 +353,9 @@ export function chain(ops: readonly Op[]): Chain {
     last = k;
   }
 
+  // An open run reaching the limit is broken there and then. A closing at `MAX_OPEN` is fine —
+  // the loop above lets it through — but an open one has spent the whole allowance without
+  // closing, so the soonest close left to it spans `MAX_OPEN + 1`.
   const since = ops.length - last;
-  return { since, broken: broken || since > MAX_OPEN, closings };
+  return { since, broken: broken || since >= MAX_OPEN, closings };
 }
