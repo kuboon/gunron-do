@@ -300,11 +300,12 @@ export function reducedLength(ops: readonly Op[]): number {
  * five, 1.4 at six, 2.1 at seven, 2.7 at eight. Every cell above a player's reach is a gift to the
  * one who is not looking.
  *
- * So it should sit at the reach, and this game has already named that: `hint.ts` searches five
- * deep, because five is what the walkthrough is willing to ask someone to hold in their head. Six
- * is that plus one — nothing for the ordinary reader, a reward for the player who sees one cell
- * further, and only 0.5 of a cell handed to the wanderer. Seven buys headroom almost nobody has
- * and pays for it at half again the wanderer's rate.
+ * So it should sit at the reach, and this game names its reach in the one place it asks a player
+ * to read: the walkthrough's last step is a six-cell trace, and it is six because it is a three
+ * and then a three again — which is how a stretch of six is meant to be read here, and the most a
+ * first lesson is willing to ask anyone to hold. Above six only the wanderer collects, at half
+ * again its rate per cell. Below it the reader starts paying: five costs them a little and four
+ * costs them real ground.
  */
 export const MAX_OPEN = 6;
 

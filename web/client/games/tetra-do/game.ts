@@ -545,13 +545,34 @@ export class TetraDo {
   }
 
   /**
-   * Hands over the board to be practised on: real cells, real rules, no clock.
+   * Hands over a board to be practised on: real cells, real rules, no clock.
    *
-   * The same board the player is about to be given, because the lesson is the game rather than a
-   * picture of it. Whatever they do to it here is undone when the round starts, which deals itself
-   * from the day all over again.
+   * The board comes in rather than being dealt. The lesson is the game rather than a picture of
+   * it, but it is still a lesson, and a lesson wants a board holding the thing it is about — the
+   * last step is a trace that comes home twice, and most days are not holding one of those where
+   * the step before it can reach. So the walkthrough brings its own, and what the round deals is
+   * the day's, untouched by the practice.
+   *
+   * @param ops What every cell holds, by index
    */
-  teach(): void {
+  teach(ops: readonly Op[]): void {
+    // Seeded, so what falls in behind the cleared cells is the same every time. No step depends
+    // on it — they sit where the steps before them do not reach — but a lesson that is the same
+    // twice is a lesson that can be checked.
+    this.#random = mulberry32(hash("practice"));
+    this.#cells = ops.map((op) => ({ id: this.#nextId++, op }));
+    this.#path = [];
+    this.#hint = [];
+    this.#cleared = 0;
+    this.#solved = 0;
+    this.#combo = 0;
+    this.#clearedPop = null;
+    this.#comboPop = null;
+    this.#burst = null;
+    this.#shake = null;
+    this.#hitStop = 0;
+    this.#due = [];
+    this.#resetSolid();
     this.#phase = "teaching";
     this.#emit();
   }
