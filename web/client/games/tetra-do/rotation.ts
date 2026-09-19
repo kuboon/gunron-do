@@ -338,6 +338,54 @@ export interface Chain {
    * Three cells is the least an answer can be, so twenty-five cells hold at most eight of them.
    */
   closings: number;
+  /**
+   * The stretch that spent the allowance, or `null` while the trace is still good for something.
+   *
+   * Which cells went wrong, rather than only that some did. A broken trace is worth nothing from
+   * end to end, but it did not go wrong everywhere: it went wrong here, and a player who is told
+   * *here* can see what to do about it next time.
+   */
+  overrun: Overrun | null;
+}
+
+/** The cells of the stretch that spent {@link MAX_OPEN}, as positions in the trace. */
+export interface Overrun {
+  /** The first cell of the stretch: the one after the closing before it, or the trace's own start. */
+  from: number;
+  /**
+   * The cell the count reached {@link MAX_OPEN} on.
+   *
+   * Also the last cell of the trace worth drawing a line to. Every move past it is a move the
+   * stretch cannot pay for, so there is nothing to show for one.
+   */
+  to: number;
+}
+
+/**
+ * Where a trace first ran out of allowance.
+ *
+ * A cell at a time rather than by prefixes, because what is wanted is *where* it happened rather
+ * than whether it did. Home is looked for first at each cell, since closing on the allowance is
+ * spending it exactly, not overspending it.
+ *
+ * @param ops The moves, in trace order
+ * @returns The stretch that spent it, or `null` if none did
+ */
+function overrunOf(ops: readonly Op[]): Overrun | null {
+  let from = 0;
+  for (let j = 0; j < ops.length; j++) {
+    const prefix = ops.slice(0, j + 1);
+    if (
+      reducedLength(prefix) >= MIN_REDUCED_LENGTH && isIdentity(compose(prefix))
+    ) {
+      from = j + 1;
+      continue;
+    }
+    if (reducedLength(ops.slice(from, j + 1)) >= MAX_OPEN) {
+      return { from, to: j };
+    }
+  }
+  return null;
 }
 
 /**
@@ -385,5 +433,14 @@ export function chain(ops: readonly Op[]): Chain {
   // on `MAX_OPEN` is fine — the loop above lets it through — but once the allowance is gone every
   // move that is not a cancellation puts the stretch over, and a cancellation cannot close.
   const since = reducedLength(ops.slice(last));
-  return { since, broken: broken || since >= MAX_OPEN, closings };
+  const spoiled = broken || since >= MAX_OPEN;
+  // Only while it is actually spoiled. A finger that backs out of an overrun takes the moves out
+  // of the count with it, and a trace that is good again should not still be carrying a mark
+  // saying where it once was not.
+  return {
+    since,
+    broken: spoiled,
+    closings,
+    overrun: spoiled ? overrunOf(ops) : null,
+  };
 }

@@ -27,6 +27,7 @@ import {
   OP_ROTATIONS,
   opBase,
   opInverse,
+  type Overrun,
   type Quat,
   reducedLength,
   slerp,
@@ -409,6 +410,11 @@ export class TetraDo {
   /** How many cells the trace has gone since the solid was last home. */
   get since(): number {
     return this.#path.length === 0 ? 0 : chain(this.word).since;
+  }
+
+  /** Which cells of the trace spent the allowance, for the board to say so with. */
+  get overrun(): Overrun | null {
+    return this.#path.length === 0 ? null : chain(this.word).overrun;
   }
 
   /** The cells being traced, in the order they were touched. */
