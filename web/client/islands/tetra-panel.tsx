@@ -214,7 +214,7 @@ export const TetraPanel = clientEntry(
             {scoreboard({
               cleared: game.cleared,
               solved: game.solved,
-              longest: game.longest,
+              combo: game.combo,
             })}
             <div mix={buttonsStyle}>
               {game.replaying
@@ -324,8 +324,8 @@ function scoreboard(result: Outcome) {
         <dd>{result.solved}</dd>
       </div>
       <div>
-        <dt>最長</dt>
-        <dd>{result.longest}</dd>
+        <dt>コンボ</dt>
+        <dd>{result.combo}</dd>
       </div>
     </dl>
   );

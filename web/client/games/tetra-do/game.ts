@@ -91,7 +91,7 @@ export type Phase = "ready" | "teaching" | "counting" | "playing" | "over";
  * A number that just moved, for the HUD to make a fuss about.
  *
  * The board used to say what happened in a line of prose under it. It says it with the numbers
- * now: the score and the longest trace jump when they change. One of these is what makes that
+ * now: the score and the combo jump when they change. One of these is what makes that
  * happen — the text to float, and when, so the HUD can work out how far along the animation is on
  * the frame it is drawing.
  */
@@ -230,8 +230,8 @@ export class TetraDo {
 
   /** How many cells have been taken off the board by a trace that counted. */
   #cleared = 0;
-  /** The longest counted trace, in cells. */
-  #longest = 0;
+  /** The most answers one pass was made of. */
+  #combo = 0;
   /** How many traces came home. */
   #solved = 0;
   #timeLeft = ROUND_MS;
@@ -239,7 +239,7 @@ export class TetraDo {
   #leadIn = 0;
   #phase: Phase = "ready";
   #clearedPop: Pop | null = null;
-  #longestPop: Pop | null = null;
+  #comboPop: Pop | null = null;
   /** Cells the walkthrough is pointing at, for the board to ring. */
   #hint: readonly number[] = [];
   #popId = 0;
@@ -423,9 +423,16 @@ export class TetraDo {
   get cleared(): number {
     return this.#cleared;
   }
-  /** The longest counted trace, in cells. */
-  get longest(): number {
-    return this.#longest;
+  /**
+   * The most answers one pass was made of.
+   *
+   * The number that took the longest trace's place. Length stopped being the thing worth counting
+   * once it had to be a chain of closings anyway — a fourteen-cell trace is four answers, and
+   * *four* is what the player did. Eight is the ceiling: an answer is three cells at the least,
+   * and there are twenty-five cells.
+   */
+  get combo(): number {
+    return this.#combo;
   }
   /** How many traces came home. */
   get solved(): number {
@@ -441,9 +448,9 @@ export class TetraDo {
   get clearedPop(): Pop | null {
     return this.#clearedPop;
   }
-  /** The last time the longest trace was beaten. */
-  get longestPop(): Pop | null {
-    return this.#longestPop;
+  /** The last time the best combo was beaten. */
+  get comboPop(): Pop | null {
+    return this.#comboPop;
   }
   /** The sparks thrown by the cells that just cleared, or `null` between clears. */
   get burst(): Burst | null {
@@ -603,13 +610,13 @@ export class TetraDo {
     this.#fill();
     this.#path = [];
     this.#cleared = 0;
-    this.#longest = 0;
+    this.#combo = 0;
     this.#solved = 0;
     this.#hint = [];
     this.#timeLeft = ROUND_MS;
     this.#phase = "playing";
     this.#clearedPop = null;
-    this.#longestPop = null;
+    this.#comboPop = null;
     this.#burst = null;
     this.#shake = null;
     this.#hitStop = 0;
@@ -781,11 +788,12 @@ export class TetraDo {
 
     // Home, long enough to be an answer, and closed often enough along the way. The last of the
     // three is what keeps length worth something: see `MAX_OPEN`.
+    const links = chain(word);
     if (
       isIdentity(compose(word)) && reduced >= MIN_REDUCED_LENGTH &&
-      !chain(word).broken
+      !links.broken
     ) {
-      this.#solve(reduced);
+      this.#solve(reduced, links.closings);
       return;
     }
 
@@ -820,17 +828,22 @@ export class TetraDo {
    *
    * @param reduced The trace's length with the cancellations taken out
    */
-  #solve(reduced: number): void {
-    const tier = reduced >= LARGE_CLEAR ? "large" : "medium";
-    const record = reduced > this.#longest;
+  #solve(reduced: number, closings: number): void {
+    // A pass made of more than one answer earns the full treatment whatever its length: chaining
+    // is the thing the game now asks for, so it is the thing the board should shout about.
+    const tier = closings >= 2 || reduced >= LARGE_CLEAR ? "large" : "medium";
+    const record = closings > this.#combo;
 
-    this.#solved += 1;
+    // Each answer counts, not each pass. A fourteen-cell trace that came home four times on the
+    // way is four answers taken in one go, and saying "1" would be counting the gesture rather
+    // than what it did.
+    this.#solved += closings;
     this.#cleared += reduced;
-    this.#longest = Math.max(this.#longest, reduced);
+    this.#combo = Math.max(this.#combo, closings);
     this.#clearedPop = this.#pop(`+${reduced}`);
-    // An arrow rather than the bare number: beside a number that already says `6`, a floating
-    // `6` reads as a second count rather than as the one that just moved.
-    if (record) this.#longestPop = this.#pop(`↑${reduced}`);
+    // An arrow rather than the bare number: beside a number that already says `4`, a floating
+    // `4` reads as a second count rather than as the one that just moved.
+    if (record) this.#comboPop = this.#pop(`↑${closings}`);
     this.#queue.push({ kind: "flash" });
 
     this.#burst = {
@@ -1160,7 +1173,7 @@ export const game: TetraDo = new TetraDo();
 export interface Outcome {
   cleared: number;
   solved: number;
-  longest: number;
+  combo: number;
 }
 
 /**
@@ -1179,5 +1192,5 @@ export function outcome(date: string, moves: readonly Move[]): Outcome {
   const run = new TetraDo(SILENCE);
   run.startReplay(date, moves);
   run.runToEnd();
-  return { cleared: run.cleared, solved: run.solved, longest: run.longest };
+  return { cleared: run.cleared, solved: run.solved, combo: run.combo };
 }

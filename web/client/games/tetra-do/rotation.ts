@@ -302,6 +302,17 @@ export interface Chain {
   since: number;
   /** Whether it has already gone too far to count, wherever the finger stops. */
   broken: boolean;
+  /**
+   * How many answers the trace is made of.
+   *
+   * One per stretch between closings that survives the free reduction as three moves or more. A
+   * stretch that is nothing but a cancelling pair brings the solid home and is a fine place to
+   * carry on from, but it is not an answer and is not counted — which is what stops a player
+   * padding a combo with `a a⁻¹` over and over.
+   *
+   * Three cells is the least an answer can be, so twenty-five cells hold at most eight of them.
+   */
+  closings: number;
 }
 
 /**
@@ -320,6 +331,7 @@ export interface Chain {
 export function chain(ops: readonly Op[]): Chain {
   let last = 0;
   let broken = false;
+  let closings = 0;
 
   for (let k = MIN_REDUCED_LENGTH; k <= ops.length; k++) {
     const prefix = ops.slice(0, k);
@@ -329,9 +341,10 @@ export function chain(ops: readonly Op[]): Chain {
       continue;
     }
     if (k - last > MAX_OPEN) broken = true;
+    if (reducedLength(ops.slice(last, k)) >= MIN_REDUCED_LENGTH) closings += 1;
     last = k;
   }
 
   const since = ops.length - last;
-  return { since, broken: broken || since > MAX_OPEN };
+  return { since, broken: broken || since > MAX_OPEN, closings };
 }

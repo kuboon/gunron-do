@@ -50,7 +50,10 @@ const STEPS: readonly Step[] = [
   },
   {
     ask: "できた道をなぞってみよう。",
-    done: "長い道ほど「最長」が伸びます。",
+    // What the number did, not what it should have been. The path this step points at is whatever
+    // the board is holding, and most of them come home once — a line promising two would be the
+    // lesson telling the player something the board just did not do.
+    done: "なぞりの中で戻った回数が、そのまま「成立」です。",
   },
 ];
 
