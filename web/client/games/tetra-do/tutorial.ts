@@ -195,8 +195,10 @@ class Tutorial {
       : this.#at > 0
       ? STEPS[this.#at - 1].done
       : "";
+    // Nothing left to ask for, so the last line points at where the rest of it is written down.
+    // The link it names sits in the page's own nav, under the controls this line is printed in.
     const ask = this.#at >= STEPS.length
-      ? "これで遊べます。"
+      ? "より詳しく知りたい方は↓の「ルールを読む」をどうぞ。"
       : STEPS[this.#at].ask;
     return done === "" ? ask : `${done}\n${ask}`;
   }
