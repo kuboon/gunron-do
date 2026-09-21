@@ -799,25 +799,27 @@ export class TetraDo {
       return;
     }
 
-    const reduced = reducedLength(word);
-
-    // Nothing but cancellations: `a a⁻¹`, or several such pairs in a row. It comes home because
-    // it never went anywhere, so it is not an answer and counts as nothing — but it is allowed
-    // to take those cells off the board.
-    if (reduced === 0) {
-      this.#undo();
+    // Two cells change places. Whichever two, whatever they hold.
+    //
+    // The board's one move that is not an answer. It asks *which two*: both cells stay on the
+    // board, so the question is which pair is worth more the other way round, and that is read
+    // rather than tapped. It used to be the swap only when the pair did not cancel, and a
+    // cancelling pair cleared instead — which put a special case on the shortest gesture there
+    // is. Two cells is the one thing a player will do by accident, and a gesture that does one
+    // of two things depending on what is under it is one they have to check before making.
+    if (word.length === 2) {
+      this.#swap(this.#path[0], this.#path[1]);
       return;
     }
 
-    // Two cells that do not cancel: they change places.
-    //
-    // The board's one move that is not an answer. It was a double tap that took a cell away, which
-    // asked nothing and gave nothing — a cell you could not use went in the bin and the column
-    // dropped a stranger in behind it. This asks something: *which two*. Both cells stay on the
-    // board, so the question is which pair is worth more the other way round, and that is read
-    // rather than tapped.
-    if (word.length === 2) {
-      this.#swap(this.#path[0], this.#path[1]);
+    const reduced = reducedLength(word);
+
+    // Nothing but cancellations: `a a⁻¹ b b⁻¹`, or more pairs in a row. It comes home because it
+    // never went anywhere, so it is not an answer and counts as nothing — but it is allowed to
+    // take those cells off the board. Four cells at least, now that two are a swap: a pair is
+    // what cancels, and one pair is a swap.
+    if (reduced === 0) {
+      this.#undo();
       return;
     }
 

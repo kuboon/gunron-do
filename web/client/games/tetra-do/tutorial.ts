@@ -21,7 +21,7 @@
  *
  * A step points at some cells and waits for the board to answer. Three of the four end the same
  * way — the cells the player was pointed at are gone — so one test covers a path that comes home,
- * a pair that cancels, and the path a swap opened. The swap itself is the odd one: nothing goes,
+ * a run that cancels itself out, and the path a swap opened. The swap is the odd one: nothing goes,
  * two things change places, so that step watches for the cells to have moved instead. Neither test
  * asks *how*, which is what keeps this file from being a second copy of the rules.
  *
@@ -59,9 +59,10 @@ const Ci: Op = 5;
 /**
  * The board the lesson is taught on.
  *
- * Arranged, not dealt. Reading across the top three columns: `a b c` for the first step, and the
- * `a` `a⁻¹` under it for the second. The right two columns hold the last two steps — a `c` and a
- * `b` side by side at row three, which is the pair to swap, and the six cells
+ * Arranged, not dealt. The left three columns hold the first two steps: `a b c` across the top,
+ * and under it the four cells `5 6 7 12`, which read `a a⁻¹ b b⁻¹` — two pairs that cancel each
+ * other out, so the trace comes home having gone nowhere. The right two columns hold the last two
+ * steps — a `c` and a `b` side by side at row three, which is the pair to swap, and the six cells
  * `3 4 9 8 13 14` they finish, which spell `a b c a c b` now and `a b c a b c` once those two have
  * changed places. That word comes home at its third cell and again at its sixth, which is the
  * whole of what the last step is for.
@@ -69,8 +70,8 @@ const Ci: Op = 5;
 // deno-fmt-ignore
 const BOARD: readonly Op[] = [
   A,  B,  C,  A,  B,
-  A,  Ai, Bi, A,  C,
-  Ci, B,  Ai, C,  B,
+  A,  Ai, B,  A,  C,
+  Ci, B,  Bi, C,  B,
   Bi, C,  A,  Bi, Ci,
   C,  Ai, Bi, A,  B,
 ];
@@ -95,13 +96,13 @@ const STEPS: readonly Step[] = [
     word: [A, B, C],
   },
   {
-    ask: "この2マスは打ち消し合います。なぞってみよう。",
+    ask: "打ち消し合う手だけの道です。なぞってみよう。",
     done: "消えましたが、スコアには入りません。",
-    cells: [5, 6],
-    word: [A, Ai],
+    cells: [5, 6, 7, 12],
+    word: [A, Ai, B, Bi],
   },
   {
-    ask: "打ち消し以外は入れ替わります。なぞってみよう。",
+    ask: "2マスだけなぞると入れ替わります。なぞってみよう。",
     done: "入れ替わって、道がつながりました。",
     cells: [13, 14],
     word: [C, B],
