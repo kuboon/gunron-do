@@ -195,26 +195,22 @@ export const TetraBoard = clientEntry(
             {game.cells.map((cell, index) => (
               <div
                 key={cell.id}
-                mix={hint.includes(index)
-                  ? [
-                    cellStyle,
-                    hintStyle,
-                    animateEntrance({
-                      opacity: 0,
-                      transform: "translateY(-40%)",
-                      duration: 220,
-                    }),
-                    animateLayout(),
-                  ]
-                  : [
-                    cellStyle,
-                    animateEntrance({
-                      opacity: 0,
-                      transform: "translateY(-40%)",
-                      duration: 220,
-                    }),
-                    animateLayout(),
-                  ]}
+                // The ring is an attribute rather than a mixin the cell grows and loses. A cell
+                // that gained one used to be handed a four-long list where it had had a three-long
+                // one, which moves `animateEntrance` and `animateLayout` along it — and a moved
+                // animation is a new animation, so the cell played its entrance again. Nothing
+                // about it had changed; it had been pointed at. Same list every time, and the
+                // only cells that move are the ones the board actually moved.
+                data-hint={hint.includes(index) ? "" : undefined}
+                mix={[
+                  cellStyle,
+                  animateEntrance({
+                    opacity: 0,
+                    transform: "translateY(-40%)",
+                    duration: 220,
+                  }),
+                  animateLayout(),
+                ]}
               >
                 <div
                   mix={faceMix(
@@ -517,21 +513,6 @@ const boardStyle = css({
  * eye is on, so the board has to be the thing that says "here", and a still outline on a board of
  * outlines is not a thing that says anything.
  */
-const hintStyle = css({
-  // Between two thicknesses rather than between a ring and nothing: a ring that goes away half
-  // the time is a ring a player has to wait for.
-  "@keyframes tetra-hint": {
-    "0%, 100%": { boxShadow: `0 0 0 2px ${OP_COLORS[0]}` },
-    "50%": { boxShadow: `0 0 0 5px ${OP_COLORS[0]}` },
-  },
-  borderRadius: "12px",
-  animation: "tetra-hint 1.1s ease-in-out infinite",
-  "@media (prefers-reduced-motion: reduce)": {
-    animation: "none",
-    boxShadow: `0 0 0 3px ${OP_COLORS[0]}`,
-  },
-});
-
 /** The number on a hinted cell: which one to touch first. */
 const orderStyle = css({
   position: "absolute",
@@ -549,7 +530,28 @@ const orderStyle = css({
   lineHeight: 1,
 });
 
-const cellStyle = css({ aspectRatio: "1" });
+/**
+ * One slot on the board, and the ring the walkthrough points with.
+ *
+ * The ring is in here, under an attribute, rather than in a mixin of its own — see the cell above
+ * for why. Between two thicknesses rather than between a ring and nothing: a ring that goes away
+ * half the time is a ring a player has to wait for.
+ */
+const cellStyle = css({
+  aspectRatio: "1",
+  "@keyframes tetra-hint": {
+    "0%, 100%": { boxShadow: `0 0 0 2px ${OP_COLORS[0]}` },
+    "50%": { boxShadow: `0 0 0 5px ${OP_COLORS[0]}` },
+  },
+  "&[data-hint]": {
+    borderRadius: "12px",
+    animation: "tetra-hint 1.1s ease-in-out infinite",
+    "@media (prefers-reduced-motion: reduce)": {
+      animation: "none",
+      boxShadow: `0 0 0 3px ${OP_COLORS[0]}`,
+    },
+  },
+});
 
 const faceStyle = css({
   position: "relative",
