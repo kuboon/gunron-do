@@ -1,5 +1,5 @@
 /**
- * The walkthrough: four things to do on a board built to show them.
+ * The walkthrough: six things to do on a board built to show them.
  *
  * It was five pages of prose once, and prose turned out to be the wrong medium for it. Nothing
  * written down conveys *the solid turns as your finger moves and the path vanishes when it comes
@@ -7,23 +7,26 @@
  * cells, real rules, minus the clock.
  *
  * The board is this file's rather than the day's. A lesson taught on whatever a day dealt has to
- * go looking for something roughly like each step and take what it finds, and the last step wants
- * a trace that comes home *twice* — six cells at the very least. A search that stops five deep,
- * which is as far as a first lesson should ask anyone to read, can never return one. So that step
- * pointed at whatever short path was lying around and its closing line said something true about
- * the rules instead of something true about what had just happened. Naming the board is what lets
- * the line say what the player watched.
+ * go looking for something roughly like each step and take what it finds, and most of these steps
+ * are not things a day is holding: a five-cell start with a right way on and a wrong one, a
+ * cancelling pair sitting between two ways home. Naming the board is what lets each closing line
+ * say what the player just watched rather than what the rules say in general.
  *
- * Where each step sits is part of the layout. The first two clear cells in the left three columns
- * and the last two live in the right two, which those clears never move — a column with nothing
- * taken out of it keeps every cell it had. So the cells the last two steps point at are the cells
- * they were laid out as, and what falls in behind the cleared ones is scenery.
+ * The six are two lessons. The first pair is the swap and what it is for — two cells change
+ * places, and the three above turn into a way home. The other four are a single gesture along one
+ * route, because that is the only way to show the last three at all: the rule broken and the line
+ * stopping, the same trace rescued by backing off one cell and going the other way, and then a
+ * bridge and a second way home without the finger ever coming up. Between them they say what
+ * counts, what does not, and what a combo is made of.
  *
- * A step points at some cells and waits for the board to answer. Three of the four end the same
- * way — the cells the player was pointed at are gone — so one test covers a path that comes home,
- * a run that cancels itself out, and the path a swap opened. The swap is the odd one: nothing goes,
- * two things change places, so that step watches for the cells to have moved instead. Neither test
- * asks *how*, which is what keeps this file from being a second copy of the rules.
+ * Those four steps point at the route *from its start*, not at the piece still to be traced. A
+ * player who lifts halfway through has to begin again, and the numbers on the board are what tell
+ * them where from.
+ *
+ * A step waits for the board, or for the trace. Clearing and swapping change the board, so those
+ * steps watch it; the middle of the gesture changes nothing until it ends, so those steps watch
+ * where the finger has been. Neither asks *how*, which is what keeps this file from being a
+ * second copy of the rules.
  *
  * The preference lives in `localStorage`, read once and lazily: this module is imported by islands
  * that also render on the server, where there is no storage to read and nothing to decide yet.
@@ -35,10 +38,15 @@ import type { Op } from "./rotation.ts";
 /** Where the preference is kept between visits. */
 const STORAGE_KEY = "tetra-do:tutorial";
 
-/** What a step is waiting to see happen to the cells it pointed at. */
+/**
+ * What a step is waiting to see happen to the cells it pointed at.
+ *
+ * `gone` is a trace that cleared them, `moved` a swap, and `traced` the finger simply having been
+ * over all of them — which is the one the middle of the lesson needs, because those steps happen
+ * inside a single gesture and the board does not change until it ends.
+ */
 interface Awaiting {
-  /** Gone, or moved: which of the two is this step being done. */
-  kind: "gone" | "moved";
+  kind: "gone" | "moved" | "traced";
   /** The cells pointed at, by their own identity rather than by where they are. */
   ids: number[];
   /** Where each of them was when the step began. */
@@ -59,22 +67,39 @@ const Ci: Op = 5;
 /**
  * The board the lesson is taught on.
  *
- * Arranged, not dealt. The left three columns hold the first two steps: `a b c` across the top,
- * and under it the four cells `5 6 7 12`, which read `a a⁻¹ b b⁻¹` — two pairs that cancel each
- * other out, so the trace comes home having gone nowhere. The right two columns hold the last two
- * steps — a `c` and a `b` side by side at row three, which is the pair to swap, and the six cells
- * `3 4 9 8 13 14` they finish, which spell `a b c a c b` now and `a b c a b c` once those two have
- * changed places. That word comes home at its third cell and again at its sixth, which is the
- * whole of what the last step is for.
+ * Arranged, not dealt, and laid out as two lessons that keep out of each other's way.
+ *
+ * The top-left three cells are the first two steps: `a c b`, which is not a way home, until the
+ * swap makes it `a b c`, which is. Clearing them takes the top off three columns, and a column
+ * with its top taken off keeps every cell below where it was — so the rest of the board is
+ * exactly where the rest of the lesson left it.
+ *
+ * The rest is one route, traced in one gesture, that the last four steps walk along:
+ *
+ * ```
+ *   3 → 8 → 13 → 18 → 23 → 22 → 17 → 12 → 7 → 6 → 11
+ *   a   a    b    a    a    b    c   c⁻¹  a⁻¹  c⁻¹  b⁻¹
+ *                       ↘ 24 (a)
+ * ```
+ *
+ * Five moves in, the finger is at cell 23 with two ways on. Cell 24 spends the sixth without
+ * coming home, which is the rule being broken; cell 22 comes home instead, which is the rule
+ * being kept. Then `c` `c⁻¹` cancel each other out — two cells crossed for nothing, which is what
+ * a bridge is — and the last three come home again. Nine moves counted out of eleven cells
+ * traced, home twice: the whole of what the last three steps are about.
  */
 // deno-fmt-ignore
 const BOARD: readonly Op[] = [
-  A,  B,  C,  A,  B,
-  A,  Ai, B,  A,  C,
-  Ci, B,  Bi, C,  B,
-  Bi, C,  A,  Bi, Ci,
-  C,  Ai, Bi, A,  B,
+  A,  C,  B,  A,  Bi,
+  B,  Ci, Ai, A,  C,
+  Ai, Bi, Ci, B,  Ci,
+  C,  A,  C,  A,  B,
+  Ai, Bi, B,  A,  A,
 ];
+
+/** The route the last four steps walk, and the cell that is the wrong way on. */
+const ROUTE = [3, 8, 13, 18, 23, 22, 17, 12, 7, 6, 11] as const;
+const DEAD = 24;
 
 /** What a step asks for, where it is, and what to say once it has been done. */
 export interface Step {
@@ -82,6 +107,8 @@ export interface Step {
   ask: string;
   /** What just happened, said once they have. */
   done: string;
+  /** What ends the step. */
+  wants: Awaiting["kind"];
   /** The cells to point at, in the order they are to be traced. */
   cells: readonly number[];
   /** What those cells hold when the step comes round, which is what makes it this step. */
@@ -90,30 +117,49 @@ export interface Step {
 
 const STEPS: readonly Step[] = [
   {
-    ask: "光ったマスを順になぞってみよう。",
+    ask: "この2マスをなぞってみよう。",
+    done: "入れ替わりました。2マスなぞると、いつでも入れ替えです。",
+    wants: "moved",
+    cells: [1, 2],
+    word: [C, B],
+  },
+  {
+    ask: "入れ替わって、上の3マスが道になりました。なぞってみよう。",
     done: "テトラが元の向きに戻り、道が消えました。",
+    wants: "gone",
+    // After the swap, so the other way round from how the board above was laid out.
     cells: [0, 1, 2],
     word: [A, B, C],
   },
   {
-    ask: "打ち消し合う手だけの道です。なぞってみよう。",
-    done: "消えましたが、スコアには入りません。",
-    cells: [5, 6, 7, 12],
-    word: [A, Ai, B, Bi],
+    ask: "長い道も引けます。光った順になぞってみよう。",
+    done:
+      "6手使っても戻らなかったので、赤で止まりました。この先へは進めません。",
+    wants: "traced",
+    cells: [...ROUTE.slice(0, 5), DEAD],
+    word: [A, A, B, A, A, A],
   },
   {
-    ask: "2マスだけなぞると入れ替わります。なぞってみよう。",
-    done: "入れ替わって、道がつながりました。",
-    cells: [13, 14],
-    word: [C, B],
+    ask: "最後の1マスを戻して、今度はこちらへ。",
+    done: "元の向きに戻りました。これで「成立」がひとつです。",
+    wants: "traced",
+    cells: ROUTE.slice(0, 6),
+    word: [A, A, B, A, A, B],
   },
   {
-    ask: "できた道をなぞってみよう。",
-    done: "1回のなぞりで2回戻りました。成立が2つ増えて、コンボは2です。",
-    // The swap has happened by the time this step is asked for, so the last two read the other way
-    // round from how the board above was laid out.
-    cells: [3, 4, 9, 8, 13, 14],
-    word: [A, B, C, A, B, C],
+    ask: "指は離さず、続けてこの2マスへ。",
+    done: "打ち消し合う2マスなので、数には入りません。渡っただけです。",
+    wants: "traced",
+    cells: ROUTE.slice(0, 8),
+    word: [A, A, B, A, A, B, C, Ci],
+  },
+  {
+    ask: "そのまま最後までなぞって、指を離そう。",
+    done:
+      "2回戻ったので、成立が2つ増えてコンボは2。11マスなぞって消去は9です。",
+    wants: "gone",
+    cells: ROUTE,
+    word: [A, A, B, A, A, B, C, Ci, Ai, Ci, Bi],
   },
 ];
 
@@ -257,15 +303,9 @@ class Tutorial {
       return;
     }
 
-    // Three of the four steps end with the cells gone. The swap ends with them still there and
-    // somewhere else, so that one watches for the move instead.
     const cells = [...step.cells];
     const ids = cells.map((index) => game.cells[index].id);
-    this.#awaiting = {
-      kind: this.#at === 2 ? "moved" : "gone",
-      ids,
-      at: cells,
-    };
+    this.#awaiting = { kind: step.wants, ids, at: cells };
     game.setHint(cells);
   }
 
@@ -301,6 +341,15 @@ class Tutorial {
    * deal the very move the lesson wanted back into the place it came from.
    */
   #judge(waiting: Awaiting): Standing {
+    // The middle of the lesson happens inside one gesture, with nothing cleared and nothing
+    // swapped, so those steps ask the trace rather than the board: the finger has been over every
+    // cell they pointed at, in whatever order it got there.
+    if (waiting.kind === "traced") {
+      const path = game.path;
+      if (waiting.at.every((index) => path.includes(index))) return "done";
+      return this.#holds(STEPS[this.#at]) ? "waiting" : "broken";
+    }
+
     const where = waiting.ids.map((id) =>
       game.cells.findIndex((cell) => cell.id === id)
     );
