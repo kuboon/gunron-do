@@ -17,7 +17,10 @@
  * gets to say what the round was worth first, which is the better trade anyway.
  */
 
-import { createShareButtons } from "@kuboon/share-element";
+import {
+  createShareButtons,
+  type ShareButtonsElement,
+} from "@kuboon/share-element";
 import {
   clientEntry,
   css,
@@ -40,13 +43,20 @@ import {
   type Session,
   shareUrl,
 } from "../games/tetra-do/session.ts";
+import { shareCardUrl } from "../games/tetra-do/share.ts";
 import { tutorial } from "../games/tetra-do/tutorial.ts";
 
 /** How far the recording in the URL has got. */
 type Recording =
   | { state: "none" }
   | { state: "loading" }
-  | { state: "ready"; moves: readonly Move[]; result: Outcome }
+  | {
+    state: "ready";
+    /** The round as the URL carries it, for the link that shows it to somebody else. */
+    rec: string;
+    moves: readonly Move[];
+    result: Outcome;
+  }
   | { state: "bad" };
 
 export const TetraPanel = clientEntry(
@@ -61,14 +71,18 @@ export const TetraPanel = clientEntry(
     // The board behind the panel is the one the player is about to be handed.
     if (session !== null) game.preview(session.date);
 
-    let recording: Recording = { state: session?.rec ? "loading" : "none" };
+    // Held apart from `session` so the decode below can name it inside a callback.
+    const rec = session?.rec ?? null;
+
+    let recording: Recording = { state: rec === null ? "none" : "loading" };
     /** Set while the link to a finished round is being built, so the button is pressed once. */
     let leaving = false;
 
-    if (session !== null && session.rec !== null) {
-      decodeMoves(session.rec).then((moves) => {
+    if (session !== null && rec !== null) {
+      decodeMoves(rec).then((moves) => {
         recording = moves === null ? { state: "bad" } : {
           state: "ready",
+          rec,
           moves,
           // What the round comes to, run through with nobody watching. A few milliseconds, so the
           // panel can say it before anyone presses play.
@@ -142,7 +156,9 @@ export const TetraPanel = clientEntry(
                 自分で挑戦
               </a>
             </div>
-            {shareRow()}
+            {shareRow(
+              shareCardUrl(session.date, recording.rec, recording.result),
+            )}
           </div>
         );
       }
@@ -280,10 +296,10 @@ export const TetraPanel = clientEntry(
  * constructor is the honest way round — cheaper than a declaration file that teaches the compiler
  * about one tag.
  *
- * No `url` given. The row reads `location.href` at the moment of the click, and the page this
- * panel is on *is* the round: the date and the recording in the address are what put the panel
- * here. Writing the URL out again would be saying the same thing twice, and the copy would be the
- * one that goes wrong.
+ * The `url` is given rather than left to the row's default, which is this page's own address. The
+ * address is the round and would work, but a link is read by a crawler before it is read by a
+ * person, and what a crawler finds here is the game's card — the same picture for every round ever
+ * played. `shareCardUrl` builds the link that carries *this* round's numbers instead.
  *
  * `data-rmx-preserve-dom` because the buttons are not this island's to redraw: without it the
  * reconciler takes the subtree back on the next render and the row is built again on the one
@@ -291,12 +307,13 @@ export const TetraPanel = clientEntry(
  * injects its own defaults unlayered, and unlayered CSS outranks every `@layer`, so a `css(...)`
  * mixin cannot reach them.
  *
+ * @param url What the buttons share
  * @returns The row's own box, filled once it is in the document
  */
-function shareRow(): RemixNode {
+function shareRow(url: string): RemixNode {
   return (
     <div
-      mix={[shareStyle, ref(fillShareRow)]}
+      mix={[shareStyle, ref((node) => fillShareRow(node, url))]}
       data-rmx-preserve-dom
       data-share-row
     />
@@ -304,13 +321,23 @@ function shareRow(): RemixNode {
 }
 
 /**
- * Puts the buttons in the box, once.
+ * Puts the buttons in the box, and tells them what they share.
+ *
+ * Built once — the box is preserved across renders, so the second call finds the row already
+ * there — while the URL is set every time, so a row that outlives the round it was built for
+ * still shares the right one.
  *
  * @param node The box, or `null` as it goes away
+ * @param url What the buttons share
  */
-function fillShareRow(node: Element | null): void {
-  if (node === null || node.firstElementChild !== null) return;
-  node.append(createShareButtons());
+function fillShareRow(node: Element | null, url: string): void {
+  if (node === null) return;
+  let row = node.firstElementChild as ShareButtonsElement | null;
+  if (row === null) {
+    row = createShareButtons();
+    node.append(row);
+  }
+  row.url = url;
 }
 
 /** The three numbers, in the order the clock line puts them. */

@@ -365,6 +365,44 @@ og: no glyph for 鷗 in /tetra-do/rules — see server/og/fonts/README.md
 the commands that produced it, and what to drop in for a script neither font
 covers.
 
+### A round's own card
+
+A page's card is one of a handful, so it can be drawn during the build. A
+_round_ is not: the three numbers a player finishes with are different every
+time, and a static site has no server to draw a picture per link. So a shared
+round's card is drawn by [og.kbn.one](https://og.kbn.one/), a service that fills
+in a template the site publishes.
+
+`server/og/share.ts` is that template — `vars`, the fonts to fetch, the OG text,
+and two SVGs with `{{date}}`, `{{cleared}}`, `{{solved}}` and `{{combo}}` holes
+in them. It is generated rather than hand-written for the same reason the cards
+are: the colours, the score names and the game's address are all things this
+repository already knows. It is served at `/tetra-do/og.json`, which is a route
+like any other and an entry point like the cards, since nothing on the site
+links to it.
+
+Two SVGs, because a link is shown at two shapes: the 1.91:1 one OG asks for, and
+a 1:1 one for the crawlers that thumbnail a link into a square and would
+otherwise cut the numbers in half. The service picks between them from the
+crawler's user agent.
+
+The browser half is `client/games/tetra-do/share.ts`. It builds the URL the
+share buttons hand out —
+
+```
+https://og.kbn.one/share?tmpl=gunron-do.kbn.one/tetra-do/og.json&date=…&cleared=…&rec=…
+```
+
+— a crawler that reads it gets the card with this round's numbers, and a person
+who opens it is sent on to the board with `?date=&rec=` intact. The template is
+addressed from `location` rather than from `routes.ts`, because an island cannot
+import the routes: they are built on the router, and the router is server code.
+That also makes a preview deploy share its own template and its own board.
+
+`rec` is deliberately not one of the template's `vars`. Only the names in `vars`
+are carried on to the image URL, so a recording — which the picture never shows
+— goes to the board and no further.
+
 ## Markdown content
 
 Each game's rules are a `.md` file under `server/games/`, named after the
