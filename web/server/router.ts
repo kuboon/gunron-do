@@ -183,7 +183,11 @@ router.get(routes.rules, async (context) => {
       image: rulesImage(rules.game),
       // Rules are text: the page places no island, so it ships no JavaScript at all.
       script: null,
-      children: RulesPage({ game: rules.game, body: rules.body }),
+      children: RulesPage({
+        game: rules.game,
+        body: rules.body,
+        toc: rules.toc,
+      }),
     }),
   );
 });

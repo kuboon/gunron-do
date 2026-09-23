@@ -14,12 +14,13 @@
  * a `.md` file is safe to keep beside the source: nothing serves this directory.
  */
 
-import { markdownToHast } from "@kuboon/md";
+import { markdownToHast, tocFromHast } from "@kuboon/md";
 import { hastToRemix } from "@kuboon/md/hast_to_remix.ts";
 import type { RemixNode } from "@remix-run/ui";
 import { extract } from "@std/front-matter/yaml";
 
 import { type Game, games } from "../../client/games.ts";
+import type { TocEntry } from "../../client/pages/rules.tsx";
 import { routes } from "../../client/routes.ts";
 import { ogImage } from "../og/mod.ts";
 
@@ -35,6 +36,8 @@ export interface Rules {
   summary: string;
   /** The body, already a node tree. */
   body: RemixNode;
+  /** The body's headings, for the contents at the top of the page. */
+  toc: TocEntry[];
 }
 
 /**
@@ -47,6 +50,10 @@ export interface Rules {
  * Shiki-highlighted code, tables) and `hastToRemix` converts it to `@remix-run/ui` elements. That
  * converter is its own entry point, so importing `@kuboon/md` does not put a UI framework into the
  * graph of anyone who only wants HTML out.
+ *
+ * The contents come out of the same tree, from `tocFromHast`: it reads the `id` each heading was
+ * already given rather than slugging the text a second time, so a contents link and the heading it
+ * points at cannot disagree about what the heading is called.
  *
  * Read on each request rather than cached, so editing the Markdown in the dev server is a reload
  * away — there is one file per game, and the build reads each of them once.
@@ -61,6 +68,7 @@ export async function readRules(game: Game): Promise<Rules | null> {
 
   const { attrs, body } = extract(text);
   const front = attrs as Record<string, unknown>;
+  const hast = await markdownToHast(body);
 
   return {
     game,
@@ -70,7 +78,8 @@ export async function readRules(game: Game): Promise<Rules | null> {
     summary: typeof front.summary === "string"
       ? front.summary
       : game.description,
-    body: hastToRemix(await markdownToHast(body)) as RemixNode,
+    body: hastToRemix(hast) as RemixNode,
+    toc: tocFromHast(hast),
   };
 }
 
