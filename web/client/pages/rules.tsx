@@ -7,7 +7,8 @@
  *
  * Above the body, its contents. The rules are long — a quick reference, the rules proper, and then
  * the group theory behind them — and most readers want one part of that, so the page says what is
- * in it before asking anyone to scroll through it.
+ * in it before asking anyone to scroll through it. Folded, though: twenty-odd lines of contents
+ * would push the quick reference, which is what most people came for, off the first screen.
  *
  * It ends with the way back into the game, because that is what someone reading the rules is on
  * their way to.
@@ -80,6 +81,10 @@ export default function Rules(props: RulesProps): RemixNode {
  * Nothing when the body has fewer than two headings. A contents with one line in it is the page
  * saying the same thing twice.
  *
+ * A `<details>` inside the `<nav>`, closed until someone asks, so the page still opens on the
+ * rules. It folds without a line of script, which this page has none of; the `<summary>` is the
+ * button and the heading both.
+ *
  * @param toc The body's headings, in order
  * @returns A `<nav>`, or nothing
  */
@@ -101,24 +106,26 @@ function contents(toc: readonly TocEntry[]): RemixNode {
   }
 
   return (
-    <nav mix={tocStyle} aria-labelledby="toc-heading">
-      <p id="toc-heading" mix={tocHeadingStyle}>目次</p>
-      <ol>
-        {sections.map((section) => (
-          <li key={section.head.id}>
-            {link(section.head)}
-            {section.children.length > 0
-              ? (
-                <ol>
-                  {section.children.map((child) => (
-                    <li key={child.id}>{link(child)}</li>
-                  ))}
-                </ol>
-              )
-              : null}
-          </li>
-        ))}
-      </ol>
+    <nav mix={tocStyle} aria-label="目次">
+      <details>
+        <summary>目次</summary>
+        <ol>
+          {sections.map((section) => (
+            <li key={section.head.id}>
+              {link(section.head)}
+              {section.children.length > 0
+                ? (
+                  <ol>
+                    {section.children.map((child) => (
+                      <li key={child.id}>{link(child)}</li>
+                    ))}
+                  </ol>
+                )
+                : null}
+            </li>
+          ))}
+        </ol>
+      </details>
     </nav>
   );
 }
@@ -149,7 +156,7 @@ const leadStyle = css({
  */
 const tocStyle = css({
   marginBlock: "1.5rem 2rem",
-  padding: "0.9rem 1.1rem",
+  padding: "0.6rem 1.1rem",
   border: `1px solid ${color.border}`,
   borderRadius: radius.md,
   fontSize: "0.95rem",
@@ -165,9 +172,9 @@ const tocStyle = css({
     fontSize: "0.9rem",
   },
   "& ol ol a": { color: color.muted },
-});
-
-const tocHeadingStyle = css({
-  margin: "0 0 0.4rem",
-  fontWeight: 700,
+  "& summary": {
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  "& details[open] > summary": { marginBlockEnd: "0.4rem" },
 });

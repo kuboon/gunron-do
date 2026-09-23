@@ -435,7 +435,8 @@ returns.
 The page opens with a table of contents, from `tocFromHast` — the same parsed
 tree, so each entry's link is the `id` the heading was actually given rather
 than a second slug of its text. It lists the Markdown's `#` sections and the
-`##` under them; the page's own `<h1>` is its title and stays out of it.
+`##` under them; the page's own `<h1>` is its title and stays out of it. It is
+folded in a `<details>`, so the page still opens on the quick reference.
 
 `@kuboon/md`'s Remix converter is built against one `@remix-run/ui`, and this
 site renders with one too: they have to be the same release, or the page is
