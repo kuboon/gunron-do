@@ -31,7 +31,7 @@ import { ART } from "./art.ts";
 import { type Card, renderCard } from "./card.ts";
 
 /** The eyebrow every card carries unless a page asks for its own. */
-const SITE_NAME = "gunron-do";
+export const SITE_NAME = "gunron-do";
 
 /** What a page tells its card — the two things every page module already exports. */
 export interface OgPage {
@@ -62,7 +62,7 @@ export interface OgPage {
  * The Pages workflow passes the full public URL; locally the variable is unset and there is no
  * origin — so a local build has no absolute URL to write, and says so rather than guessing one.
  */
-const siteUrl = ((): URL | null => {
+export const siteUrl = ((): URL | null => {
   const raw = Deno.env.get("BASE_URL")?.trim() ?? "";
   return /^https?:\/\//.test(raw) ? new URL(raw) : null;
 })();

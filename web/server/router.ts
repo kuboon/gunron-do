@@ -33,6 +33,7 @@ import type { FileServerBehavior } from "@remix-kbn/ssg/site";
 import { assets, assetsPath } from "./assets.ts";
 import { readRules, rulesImage } from "./games/mod.ts";
 import { ogImage, ogPaths, serveOgImage } from "./og/mod.ts";
+import { shareTemplate } from "./og/share.ts";
 import { base } from "../client/base.ts";
 import { findGame } from "../client/games.ts";
 import { Layout } from "../client/layout.tsx";
@@ -147,6 +148,21 @@ router.get(routes.home, pageAction(routes.home, Home));
 // One line per game. The screen is bespoke, so it is named here rather than looked up.
 router.get(routes.tetraDo, pageAction(routes.tetraDo, TetraDo));
 
+// The card a shared round carries. Not a card this site draws — a template og.kbn.one fills in,
+// published as one JSON file so a link to a round can show what the round came to. It never
+// changes while the server runs, so it is built once, on the way past.
+const tetraDoOg = shareTemplate();
+router.get(
+  routes.tetraDoOg,
+  () =>
+    new Response(tetraDoOg, {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "public, max-age=3600",
+      },
+    }),
+);
+
 // Every game's rules, from the Markdown file named after it. A slug that is not a game never
 // becomes a file name: `findGame` answers first, and a `404` reads as "not mine" to `compose`,
 // which is what an unknown game is.
@@ -192,6 +208,11 @@ router.map(`${base}/og/*path`, ({ request }) => serveOgImage(request));
  * It is down here rather than up with the other exports because a card is registered as its page's
  * route is wired, and this reads the register.
  */
-export const entryPoints: readonly string[] = ["/", ...ogPaths()];
+export const entryPoints: readonly string[] = [
+  "/",
+  // Prefix-free, like the cards: the build mounts the site under the deploy prefix itself.
+  routes.tetraDoOg.href().slice(base.length),
+  ...ogPaths(),
+];
 
 export default router;
