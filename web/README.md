@@ -432,6 +432,17 @@ files; `client/pages/rules.tsx` beside it is handed what it renders. The
 generator never sees Markdown at all — it serves what this site's own code
 returns.
 
+The page opens with a table of contents, from `tocFromHast` — the same parsed
+tree, so each entry's link is the `id` the heading was actually given rather
+than a second slug of its text. It lists the Markdown's `#` sections and the
+`##` under them; the page's own `<h1>` is its title and stays out of it. It is
+folded in a `<details>`, so the page still opens on the quick reference.
+
+`@kuboon/md`'s Remix converter is built against one `@remix-run/ui`, and this
+site renders with one too: they have to be the same release, or the page is
+drawn by two copies of the runtime. `@kuboon/md@0.5` moved to `@remix-run/ui`
+0.10, so the Remix set here moves with it.
+
 `mod.ts` finds the files through `import.meta.dirname`, being in the directory
 with them, so no path to them is written down anywhere. Nothing serves that
 directory as files, either, which is why the source can sit beside the `.md`
