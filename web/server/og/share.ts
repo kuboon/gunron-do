@@ -156,11 +156,13 @@ function wideCard(): string {
     const label = score.label;
     const hole = `{{${score.name}}}`;
     const color = score.color;
-    const labelY = top + 84;
-    const valueY = top + 212;
+    const labelY = top + 100;
+    const valueY = top + 208;
+    // 84 rather than larger because a column is 183 wide and Noto's digits are broad: three of
+    // them at 84 leave room either side, where at 100 a score of 128 runs up to the rule.
     return `${rule(round(left + column * i), top, deep, i)}
     <text x="${x}" y="${labelY}" fill="${muted}" font-size="28">${label}</text>
-    <text x="${x}" y="${valueY}" fill="${color}" font-size="100">${hole}</text>`;
+    <text x="${x}" y="${valueY}" fill="${color}" font-size="84">${hole}</text>`;
   }).join("");
 
   return `${open(width, height)}
