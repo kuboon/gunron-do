@@ -21,6 +21,12 @@
  * the wide card they would cut the numbers in half. The service picks between them from the
  * crawler's user agent, so the site's job is only to offer both.
  *
+ * The wide card is not always shown wide, though. Facebook fetches one image for a link wherever it
+ * is posted, and a link in a comment is shown as a square cut out of the middle of it — the crawler
+ * cannot say which it is fetching for, so the service cannot pick the square card for it. So the
+ * wide card keeps everything it says inside that middle square, and what is outside it is only
+ * background.
+ *
  * The drawing is resvg's, not Skia's: no `foreignObject`, no external stylesheet, and the fonts
  * are named in the template and subset from Google Fonts rather than vendored here. So the SVG
  * says everything in attributes — one font family at one weight, and size and colour doing the
@@ -121,42 +127,52 @@ export function shareTemplate(): string {
 }
 
 /**
- * The 1.91:1 card: the words on top, the three numbers in a row beneath them.
+ * The 1.91:1 card: the words and the three numbers, all in the square in its middle.
  *
- * 1200×630 is OG's own size, and the row is the result panel's own arrangement — three numbers
- * side by side, each in its op's colour, on the board's blue.
+ * 1200×630 is OG's own size, but Facebook crops the same image to a square when the link is in a
+ * comment — the card's full height, cut from the centre. Everything the card says is inside that
+ * square, centred, so the crop loses nothing but background; the sides are only the screen's blue
+ * and the ends of the bar.
+ *
+ * The numbers are a row, the result panel's own arrangement — three side by side, each in its op's
+ * colour — which in a square this size gives them more height than the 1:1 card's list would.
  *
  * @returns The SVG
  */
 function wideCard(): string {
   const width = 1200;
   const height = 630;
-  const pad = 80;
-  const inner = width - pad * 2;
-  const top = 330;
-  const deep = 220;
+  // The square a comment crops to, and a margin inside it so nothing touches the cut.
+  const safe = height;
+  const center = width / 2;
+  const left = (width - safe) / 2 + 40;
+  const inner = safe - 80;
+  const top = 272;
+  const deep = 290;
   const column = inner / SCORES.length;
 
   const scores = SCORES.map((score, i) => {
-    const center = round(pad + column * (i + 0.5));
+    const x = round(left + column * (i + 0.5));
     const label = score.label;
     const hole = `{{${score.name}}}`;
     const color = score.color;
-    const labelY = top + 70;
-    const valueY = top + 170;
-    return `${rule(round(pad + column * i), top, deep, i)}
-    <text x="${center}" y="${labelY}" fill="${muted}" font-size="30">${label}</text>
-    <text x="${center}" y="${valueY}" fill="${color}" font-size="96">${hole}</text>`;
+    const labelY = top + 100;
+    const valueY = top + 208;
+    // 84 rather than larger because a column is 183 wide and Noto's digits are broad: three of
+    // them at 84 leave room either side, where at 100 a score of 128 runs up to the rule.
+    return `${rule(round(left + column * i), top, deep, i)}
+    <text x="${x}" y="${labelY}" fill="${muted}" font-size="28">${label}</text>
+    <text x="${x}" y="${valueY}" fill="${color}" font-size="84">${hole}</text>`;
   }).join("");
 
   return `${open(width, height)}
   <rect width="${width}" height="${height}" fill="${bg}"/>
-${bar(width, 12)}
-  <text x="${pad}" y="140" fill="${muted}" font-size="30" letter-spacing="6">${SITE_NAME}</text>
-  <text x="${pad}" y="228" fill="${text}" font-size="76">テトラ道</text>
-  <text x="${pad}" y="288" fill="${muted}" font-size="34">{{date}} の盤面</text>
-  <rect x="${pad}" y="${top}" width="${inner}" height="${deep}" rx="28" fill="${panel}"/>
-  <g text-anchor="middle">${scores}
+${bar(width, 12, safe)}
+  <g text-anchor="middle">
+    <text x="${center}" y="104" fill="${muted}" font-size="24" letter-spacing="5">${SITE_NAME}</text>
+    <text x="${center}" y="182" fill="${text}" font-size="64">テトラ道</text>
+    <text x="${center}" y="230" fill="${muted}" font-size="28">{{date}} の盤面</text>
+    <rect x="${left}" y="${top}" width="${inner}" height="${deep}" rx="28" fill="${panel}"/>${scores}
   </g>
 </svg>
 `;
@@ -260,17 +276,25 @@ function open(width: number, height: number): string {
  * The same bar the page's own card carries, and the one thing on either card that says which game
  * this is without a word.
  *
+ * The colours change at thirds of the square in the middle rather than thirds of the card, and the
+ * first and last run on to the edges. Cut to that square, the bar is three equal parts, as it is on
+ * the square card; left wide, it is the same bar with its two ends drawn out, and still symmetric.
+ *
  * @param width The card's width
  * @param thickness How deep the bar is
+ * @param safe The side of the square in the middle — the whole width, for a card that is square
  * @returns The bar's rectangles
  */
-function bar(width: number, thickness: number): string {
-  const each = width / OP_COLORS.length;
-  return OP_COLORS.map((color, i) =>
-    `  <rect x="${round(each * i)}" y="0" width="${
-      round(each)
-    }" height="${thickness}" fill="${color}"/>`
-  ).join("\n");
+function bar(width: number, thickness: number, safe = width): string {
+  const start = (width - safe) / 2;
+  const count = OP_COLORS.length;
+  const at = (i: number) =>
+    i === 0 ? 0 : i === count ? width : start + (safe * i) / count;
+  return OP_COLORS.map((color, i) => {
+    const x = round(at(i));
+    const w = round(at(i + 1) - at(i));
+    return `  <rect x="${x}" y="0" width="${w}" height="${thickness}" fill="${color}"/>`;
+  }).join("\n");
 }
 
 /**
