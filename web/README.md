@@ -386,6 +386,13 @@ a 1:1 one for the crawlers that thumbnail a link into a square and would
 otherwise cut the numbers in half. The service picks between them from the
 crawler's user agent.
 
+The 1.91:1 one keeps everything it says inside the square in its middle anyway.
+Facebook fetches one image per link and shows it wide in a post but cut to a
+centred square in a comment, and its crawler cannot say which it is fetching
+for — so the wide card has to survive the crop. Its sides are background, and
+the bar's colours change at thirds of that square, so the crop sees three equal
+parts.
+
 The browser half is `client/games/tetra-do/share.ts`. It builds the URL the
 share buttons hand out —
 
