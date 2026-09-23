@@ -1,0 +1,33 @@
+name: register
+
+# Tells GameCenter (https://ga-cen.kbn.one) to re-read テトラ道's manifest.
+#
+# The hub reads the manifest from the published page itself, so this runs after
+# the pages workflow has deployed main rather than beside it: on the same push,
+# the two would race, and the hub could read the page before the deploy that
+# changed it. No secret and no checkout — the page's URL is what vouches for it.
+#
+# The first run answers 202: the author approves the URL once at
+# https://ga-cen.kbn.one/dev, and every run after that goes straight through.
+#
+# `@main` because kuboon/game-center has no `v1` tag yet (only `main`). Move to
+# `@v1` once it is tagged.
+
+on:
+  workflow_run:
+    workflows: [pages]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  register:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: kuboon/game-center/action@main
+        with:
+          url: https://gunron-do.kbn.one/tetra-do

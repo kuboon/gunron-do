@@ -45,6 +45,7 @@ import {
 } from "../games/tetra-do/session.ts";
 import { shareCardUrl } from "../games/tetra-do/share.ts";
 import { tutorial } from "../games/tetra-do/tutorial.ts";
+import { unlocks } from "../games/tetra-do/unlocks.ts";
 
 /** How far the recording in the URL has got. */
 type Recording =
@@ -70,6 +71,10 @@ export const TetraPanel = clientEntry(
 
     // The board behind the panel is the one the player is about to be handed.
     if (session !== null) game.preview(session.date);
+
+    // GameCenter, as early as there is a page: a player sent here by the hub carries a launch token
+    // in the URL, and the SDK takes it out of the address bar as it starts.
+    if (session !== null) unlocks.start();
 
     // Held apart from `session` so the decode below can name it inside a callback.
     const rec = session?.rec ?? null;
@@ -102,6 +107,7 @@ export const TetraPanel = clientEntry(
       if (session === null || leaving) return;
       leaving = true;
       handle.update();
+      unlocks.shared();
       location.href = shareUrl(session.date, await encodeMoves(game.moves));
     }
 
@@ -125,6 +131,11 @@ export const TetraPanel = clientEntry(
       handle.update();
     });
     handle.signal.addEventListener("abort", stopTutorial, { once: true });
+
+    const stopUnlocks = unlocks.subscribe(() => {
+      handle.update();
+    });
+    handle.signal.addEventListener("abort", stopUnlocks, { once: true });
 
     return () => {
       if (session === null) return null;
@@ -279,6 +290,7 @@ export const TetraPanel = clientEntry(
                   </>
                 )}
             </div>
+            {claim()}
           </div>
         );
       }
@@ -338,6 +350,27 @@ function fillShareRow(node: Element | null, url: string): void {
     node.append(row);
   }
   row.url = url;
+}
+
+/**
+ * The link that records what was earned on GameCenter, when anything is waiting.
+ *
+ * Only there for a player the hub has not vouched for — one who came in from the hub has each
+ * unlock recorded as it happens, and has nothing waiting. A link, not a page opened for them: the
+ * claim page lists what it is about to record, and a player should choose to go and see.
+ *
+ * @returns The link, or nothing
+ */
+function claim(): RemixNode {
+  const href = unlocks.claimUrl;
+  if (href === null) return null;
+  return (
+    <p mix={noteStyle}>
+      <a mix={claimStyle} href={href}>
+        実績を GameCenter に記録する（{unlocks.pending}件）
+      </a>
+    </p>
+  );
 }
 
 /** The three numbers, in the order the clock line puts them. */
@@ -435,6 +468,11 @@ const shareStyle = css({
   marginTop: "1rem",
   paddingTop: "0.9rem",
   borderTop: `1px solid ${surface.edge}`,
+});
+
+const claimStyle = css({
+  color: ink.text,
+  textUnderlineOffset: "2px",
 });
 
 const noteStyle = css({

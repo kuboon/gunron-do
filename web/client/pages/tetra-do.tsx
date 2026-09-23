@@ -27,6 +27,8 @@ import { TetraSeed } from "../islands/tetra-seed.tsx";
 import { TetraPanel } from "../islands/tetra-panel.tsx";
 import { TetraSolid } from "../islands/tetra-solid.tsx";
 import { findGame } from "../games.ts";
+import { GAMECENTER_AUTHOR, type GameCenterManifest } from "../gamecenter.ts";
+import { ACHIEVEMENTS, GAMECENTER_ID } from "../games/tetra-do/achievements.ts";
 import { ink, surface } from "../games/tetra-do/palette.ts";
 import { routes } from "../routes.ts";
 
@@ -52,6 +54,23 @@ export const hydrate = true;
 /** The screen is the game, and the game is dark. */
 export const chrome = "bare" as const;
 export const background: string = surface.ink;
+
+/**
+ * The game as GameCenter reads it: its name, its icon, and what can be earned in it.
+ *
+ * The icon is the site's own favicon — the tetrahedron, in the board's colours — named relative to
+ * this page, which is how the hub resolves it. `static/favicon.svg` from `/tetra-do` is
+ * `/static/favicon.svg`, and from a preview deploy's `/{branch}/tetra-do` it is that deploy's copy.
+ */
+export const gamecenter: GameCenterManifest = {
+  $schema: "https://ga-cen.kbn.one/schema/gamecenter.json",
+  id: GAMECENTER_ID,
+  author: GAMECENTER_AUTHOR,
+  title: game.title,
+  description: game.tagline,
+  icon: "static/favicon.svg",
+  achievements: ACHIEVEMENTS,
+};
 
 /** What makes `env(safe-area-inset-*)` report anything other than zero. */
 export const viewport =

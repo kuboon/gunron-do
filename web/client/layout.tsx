@@ -34,6 +34,7 @@
 import { css, type RemixNode } from "@remix-run/ui";
 
 import { base } from "./base.ts";
+import { type GameCenterManifest, manifestJson } from "./gamecenter.ts";
 import { games } from "./games.ts";
 import { routes } from "./routes.ts";
 import { color, contentWidth } from "./tokens.ts";
@@ -89,6 +90,13 @@ export interface LayoutProps {
    * shell has no use for it: the shell's own background is the right one.
    */
   background?: string;
+  /**
+   * The game's GameCenter manifest, for a game that records achievements there.
+   *
+   * In the `<head>`, as `<script type="application/gamecenter+json">`, because that is where the
+   * hub looks when it reads the page: the published page is the document it registers.
+   */
+  gamecenter?: GameCenterManifest;
   children: RemixNode;
 }
 
@@ -157,6 +165,13 @@ export function Layout(props: LayoutProps): RemixNode {
           : null}
         <link rel="stylesheet" href={`${base}/static/app.css`} />
         <link rel="icon" href={`${base}/static/favicon.svg`} />
+        {props.gamecenter
+          ? (
+            <script type="application/gamecenter+json">
+              {manifestJson(props.gamecenter)}
+            </script>
+          )
+          : null}
         {(props.script?.preloads ?? []).map((href) => (
           <link key={href} rel="modulepreload" href={href} />
         ))}
