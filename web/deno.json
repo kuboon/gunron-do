@@ -12,6 +12,7 @@
     "exclude": ["jsr:@kuboon/*", "jsr:@remix-kbn/*"]
   },
   "imports": {
+    "@kuboon/game-center-sdk": "jsr:@kuboon/game-center-sdk@^0.4.0",
     "@kuboon/share-element": "jsr:@kuboon/share-element@^0.5.0",
     "@remix-run/fetch-router": "npm:@remix-run/fetch-router@^0.22.1",
     "@remix-run/render-middleware": "npm:@remix-run/render-middleware@^0.3.1",

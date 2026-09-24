@@ -36,6 +36,7 @@ import { ogImage, ogPaths, serveOgImage } from "./og/mod.ts";
 import { shareTemplate } from "./og/share.ts";
 import { base } from "../client/base.ts";
 import { findGame } from "../client/games.ts";
+import type { GameCenterManifest } from "../client/gamecenter.ts";
 import { Layout } from "../client/layout.tsx";
 import { routes } from "../client/routes.ts";
 
@@ -66,6 +67,8 @@ interface Page {
   art?: string;
   /** Set by a page whose card wants a shorter title than its `<title>`. */
   ogTitle?: string;
+  /** Set by a game that records achievements on GameCenter — its manifest, for the `<head>`. */
+  gamecenter?: GameCenterManifest;
 }
 
 /**
@@ -91,6 +94,7 @@ function pageAction(route: { href(): string }, page: Page) {
         viewport: page.viewport,
         chrome: page.chrome,
         background: page.background,
+        gamecenter: page.gamecenter,
         script: page.hydrate ? clientRuntime : null,
         children: page.default(),
       }),

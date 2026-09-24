@@ -410,6 +410,33 @@ That also makes a preview deploy share its own template and its own board.
 are carried on to the image URL, so a recording — which the picture never shows
 — goes to the board and no further.
 
+## GameCenter
+
+テトラ道 records achievements on [GameCenter](https://ga-cen.kbn.one). The hub
+reads a game's manifest out of its published page, so the page carries it — a
+`<script type="application/gamecenter+json">` in the `<head>`, which `Layout`
+writes for any page that exports a `gamecenter` manifest. `client/gamecenter.ts`
+has its shape and the author's id; `client/pages/tetra-do.tsx` fills it in.
+
+The achievements themselves are `client/games/tetra-do/achievements.ts`: one
+list, read by the manifest and by the game, so a key the hub knows is always one
+the game can unlock, and each threshold sits next to the words describing it.
+`client/games/tetra-do/unlocks.ts` watches the game against that list and hands
+keys to the SDK (`jsr:@kuboon/game-center-sdk`). Only real rounds count — not the
+walkthrough, not a replay — except for the achievements that are about those.
+
+A player who came in from the hub carries a launch token, and each unlock is
+recorded as it happens. Anyone else has them queued on the device, and the
+result panel shows one link that records the whole queue. It is a link and not
+a window opened for them: the claim page shows what it will record first. The
+keys already earned are remembered on the device too, because without a token
+the SDK cannot ask the hub what it already has, and would otherwise offer the
+same achievement after every round.
+
+`.github/workflows/register.yaml` tells the hub to re-read the page after each
+deploy of `main`. The very first run is answered "pending" until the author
+approves the URL at https://ga-cen.kbn.one/dev; after that, a push is enough.
+
 ## Markdown content
 
 Each game's rules are a `.md` file under `server/games/`, named after the
