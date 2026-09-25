@@ -7,7 +7,7 @@
  * `og:image` in the page's HTML is the game's card, the same one for every round ever played.
  *
  * So the shared link goes the long way round, through [og.kbn.one](https://og.kbn.one/). It is
- * handed the address of this site's template — `server/og/share.ts`, published beside this page as
+ * handed the address of this site's template — `server/tetra-do/share.ts`, published beside this page as
  * `og.json` — and the values to fill it with, and it answers a crawler with a card carrying this
  * round's three numbers, and a human with a redirect to the board. The player never sees it; what
  * they copy is a URL that shows the round to whoever they send it to.

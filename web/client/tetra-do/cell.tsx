@@ -5,19 +5,14 @@
  * same picture: the tutorial is teaching the player to read the board, so a tutorial that drew its
  * own approximation would be teaching them to read something else.
  *
- * `islands/_lib/` rather than `islands/`, because the asset build takes every `islands/*.tsx` as a
+ * Beside `islands/` rather than in it, because the asset build takes every `islands/*.tsx` as a
  * browser entry point and this is not one — it is a piece several of them share.
  */
 
 import { css, type RemixNode } from "@remix-run/ui";
 
-import { OP_COLORS, surface } from "../../games/tetra-do/palette.ts";
-import {
-  type Op,
-  opBase,
-  opDirection,
-  opLabel,
-} from "../../games/tetra-do/rotation.ts";
+import { OP_COLORS, surface } from "./palette.ts";
+import { type Op, opBase, opDirection, opLabel } from "./rotation.ts";
 
 /**
  * Where each letter's mark sits in the cell's triangle: `a` bottom right, `b` bottom left, `c`

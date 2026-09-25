@@ -19,7 +19,7 @@
 
 import { GameCenter } from "@kuboon/game-center-sdk";
 
-import { gameCenterId } from "../../gamecenter.ts";
+import { gameCenterId } from "../gamecenter.ts";
 import {
   GAMECENTER_ID,
   HIGH_SCORE,

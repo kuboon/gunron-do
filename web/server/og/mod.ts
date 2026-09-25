@@ -27,8 +27,8 @@
 import { stripBase } from "@remix-kbn/ssg/site";
 
 import { base } from "../../client/base.ts";
-import { ART } from "./art.ts";
-import { type Card, renderCard } from "./card.ts";
+import { art as tetraDoArt } from "../tetra-do/art.ts";
+import { type Art, type Card, renderCard } from "./card.ts";
 
 /** The eyebrow every card carries unless a page asks for its own. */
 export const SITE_NAME = "gunron-do";
@@ -51,7 +51,7 @@ export interface OgPage {
    *
    * A name rather than the drawing itself, because a page module is rendered into HTML and has no
    * business importing a WebAssembly text shaper. The string is all that crosses the line; what
-   * it means is `art.ts`.
+   * it means is the game's own `art.ts`.
    */
   art?: string;
 }
@@ -66,6 +66,12 @@ export const siteUrl = ((): URL | null => {
   const raw = Deno.env.get("BASE_URL")?.trim() ?? "";
   return /^https?:\/\//.test(raw) ? new URL(raw) : null;
 })();
+
+/**
+ * Where a page's `art` name goes. One entry per picture, each drawn in its game's own directory;
+ * an unknown name is a mistake.
+ */
+const ART: Readonly<Record<string, Art>> = { "tetra-do": tetraDoArt };
 
 /** Image path (without the deploy prefix) -> how to fill in its card. */
 const cards = new Map<string, () => OgPage | Promise<OgPage>>();
@@ -142,7 +148,9 @@ function toCard(path: string, page: OgPage): Card {
 
   const art = page.art === undefined ? undefined : ART[page.art];
   if (page.art !== undefined && art === undefined) {
-    throw new Error(`No card art named "${page.art}" — see server/og/art.ts`);
+    throw new Error(
+      `No card art named "${page.art}" — see ART in server/og/mod.ts`,
+    );
   }
 
   return {

@@ -30,10 +30,10 @@ export const assets = await createAssetServer({
     // The client runtime. Every page that hydrates loads this one; the islands ride in the chunks
     // it shares with them.
     "hydration.ts",
-    // Every island, by where it is rather than by name. A file appearing in this directory is the
-    // decision; naming it again here would only be a second place to keep it. `islands/_lib/` is
-    // left out by depth, which is a better rule than the underscore.
-    "islands/*.tsx",
+    // Every island, by where it is rather than by name: each game keeps its own in
+    // `client/{game}/islands/`. A file appearing in one of those directories is the decision;
+    // naming it again here would only be a second place to keep it.
+    "*/islands/*.tsx",
   ],
   basePath: assetsPath,
   mode: "bundle",

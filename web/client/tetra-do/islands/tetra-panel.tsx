@@ -30,22 +30,13 @@ import {
   type RemixNode,
 } from "@remix-run/ui";
 
-import { game, type Outcome, outcome } from "../games/tetra-do/game.ts";
-import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
-import {
-  decodeMoves,
-  encodeMoves,
-  type Move,
-} from "../games/tetra-do/record.ts";
-import {
-  playUrl,
-  readSession,
-  type Session,
-  shareUrl,
-} from "../games/tetra-do/session.ts";
-import { shareCardUrl } from "../games/tetra-do/share.ts";
-import { tutorial } from "../games/tetra-do/tutorial.ts";
-import { unlocks } from "../games/tetra-do/unlocks.ts";
+import { game, type Outcome, outcome } from "../game.ts";
+import { ink, OP_COLORS, surface } from "../palette.ts";
+import { decodeMoves, encodeMoves, type Move } from "../record.ts";
+import { playUrl, readSession, type Session, shareUrl } from "../session.ts";
+import { shareCardUrl } from "../share.ts";
+import { tutorial } from "../tutorial.ts";
+import { unlocks } from "../unlocks.ts";
 
 /** How far the recording in the URL has got. */
 type Recording =

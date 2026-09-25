@@ -8,7 +8,7 @@
  * There is no one way to say so that every engine hears, so this says it every way there is. In
  * the order the browser makes its mind up:
  *
- *   `touch-action`  CSS's own answer, laid over the page in `pages/tetra-do.tsx` and over the
+ *   `touch-action`  CSS's own answer, laid over the page in `tetra-do/page.tsx` and over the
  *                   board in `tetra-board.tsx`. The right way to say it, and not always enough.
  *   `touchstart`    the one that lands. WebKit's gestures are recognised from the touch as it
  *                   begins, so a touch whose beginning is refused is never a gesture at all — by

@@ -1,7 +1,7 @@
 /**
  * A game's rules.
  *
- * The body arrives already rendered, from `server/games/` — this places it and dresses it with
+ * The body arrives already rendered, from `server/rules.ts` — this places it and dresses it with
  * `proseStyle`, which is the one mixin that reaches into markup it did not write. Text only: the
  * page places no client entry, so the rules ship no JavaScript at all.
  *

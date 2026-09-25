@@ -9,8 +9,8 @@
 
 import { clientEntry, css, type Handle } from "@remix-run/ui";
 
-import { game } from "../games/tetra-do/game.ts";
-import { ink } from "../games/tetra-do/palette.ts";
+import { game } from "../game.ts";
+import { ink } from "../palette.ts";
 
 export const TetraSeed = clientEntry(
   import.meta.url,
