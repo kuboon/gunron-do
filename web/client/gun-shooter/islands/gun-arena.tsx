@@ -103,7 +103,17 @@ export const GunArena = clientEntry(
 
     return () => {
       const target = game.target;
-      const hint = game.hint;
+      const guidance = game.guidance;
+      const advice = guidance?.guide.advice ?? null;
+      // Which buttons the advice points at: the twists, the flip, or neither.
+      const suggested = (shot: Shot): boolean =>
+        guidance?.next != null
+          ? guidance.next === shot
+          : advice === "flip"
+          ? shot === "flip"
+          : advice === "twist" || advice === "upright"
+          ? shot !== "flip"
+          : false;
       const playing = game.phase === "playing";
       const ready = game.cannonCooldown <= 0;
       const showBanner = playing && banner !== null &&
@@ -214,27 +224,52 @@ export const GunArena = clientEntry(
                     {target.species.shape}・位数 {target.species.order}
                   </span>
                 </div>
-                {target.state === 0
+                {guidance !== null
+                  ? (
+                    <div
+                      mix={leftStyle}
+                      key={`left-${target.id}-${guidance.left}`}
+                      style={{ color: guidance.left === 0 ? GOLD : INK.text }}
+                    >
+                      {guidance.left === 0 ? "e" : `あと ${guidance.left} 手`}
+                    </div>
+                  )
+                  : null}
+                {advice === "home"
                   ? (
                     <div mix={[stateStyle, homeStyle]}>
                       e に戻った！ e砲 で撃て
                     </div>
                   )
-                  : (
+                  : advice === "upright"
+                  ? (
                     <div mix={stateStyle}>
-                      <span style={{ color: SHOT_COLORS.ccw }}>↺</span>
-                      <span style={{ color: SHOT_COLORS.cw }}>↻</span>{" "}
-                      {target.species.twistDegrees}° 回転{" ／ "}
-                      <span style={{ color: SHOT_COLORS.flip }}>⇅</span> 裏返し
+                      e が正面！ {glyph("ccw")}
+                      {glyph("cw")} で立てよう
                     </div>
-                  )}
-                {hint !== null && hint.next !== null
+                  )
+                  : advice === "flip"
+                  ? (
+                    <div mix={[stateStyle, flipNowStyle]}>
+                      針が緑の輪に！ {glyph("flip")} で e を手前へ
+                    </div>
+                  )
+                  : advice === "twist"
+                  ? (
+                    <div mix={stateStyle}>
+                      {glyph("ccw")}
+                      {glyph("cw")} で<b style={{ color: GOLD }}>金の針</b>を<b
+                        style={{ color: SHOT_COLORS.flip }}
+                      >
+                        緑の輪
+                      </b>へ
+                    </div>
+                  )
+                  : null}
+                {guidance !== null && guidance.next !== null
                   ? (
                     <div mix={hintStyle}>
-                      あと {hint.left} 手 — 次は{" "}
-                      <b style={{ color: SHOT_COLORS[hint.next] }}>
-                        {SHOT_GLYPHS[hint.next]}
-                      </b>
+                      次は {glyph(guidance.next)}
                     </div>
                   )
                   : null}
@@ -250,7 +285,11 @@ export const GunArena = clientEntry(
                   <button
                     key={shot}
                     type="button"
-                    mix={[shotButtonStyle, press(shot)]}
+                    mix={[
+                      shotButtonStyle,
+                      suggested(shot) ? suggestedStyle : null,
+                      press(shot),
+                    ]}
                     aria-label={shotName(shot)}
                     aria-pressed={game.selected === shot}
                     style={{
@@ -319,16 +358,25 @@ export const GunArena = clientEntry(
                 </p>
                 <ul mix={howStyle}>
                   <li>
-                    <b style={{ color: SHOT_COLORS.ccw }}>↺</b>{" "}
-                    <b style={{ color: SHOT_COLORS.cw }}>↻</b>{" "}
-                    こちら向きの軸でひとコマ回す{" ／ "}
-                    <b style={{ color: SHOT_COLORS.flip }}>⇅</b>{" "}
-                    手前下の辺を軸に裏返す
+                    <b style={{ color: GOLD }}>金の針</b>は e の面の向き。
+                    {glyph("ccw")}
+                    {glyph("cw")}{" "}
+                    で回すと、針先が<span style={{ color: SHOT_COLORS.flip }}>
+                      緑の点線
+                    </span>
+                    にそって回る
+                  </li>
+                  <li>
+                    針先が<b style={{ color: SHOT_COLORS.flip }}>緑の輪</b>
+                    に入ったら {glyph("flip")} で e の面が手前に来る。あとは
+                    {" "}
+                    {glyph("ccw")}
+                    {glyph("cw")} で立てて <b style={{ color: GOLD }}>e砲</b>
                   </li>
                   <li>
                     e 以外に e砲 を当てると{" "}
-                    <b style={{ color: DANGER }}>反発</b>{" "}
-                    して、さらに回ってしまう
+                    <b style={{ color: DANGER }}>反発</b>
+                    してさらに回る。赤い弾は撃ち落とせ
                   </li>
                   <li mix={fineOnlyStyle}>
                     マウスで狙う・左クリックで選んだ弾（ホイール/1〜3で選択）・Q
@@ -405,6 +453,11 @@ function lockHost(el: HTMLElement): void {
     const p = el.requestPointerLock?.() as Promise<void> | undefined;
     p?.catch?.(() => {});
   } catch { /* not supported */ }
+}
+
+/** A round's glyph, in its colour. */
+function glyph(shot: Shot) {
+  return <b style={{ color: SHOT_COLORS[shot] }}>{SHOT_GLYPHS[shot]}</b>;
 }
 
 function shotName(shot: Shot): string {
@@ -804,4 +857,34 @@ const clearTitleStyle = css({
   WebkitBackgroundClip: "text",
   backgroundClip: "text",
   filter: "drop-shadow(0 0 12px rgba(41, 231, 255, 0.7))",
+});
+
+const leftStyle = css({
+  fontSize: "1.9rem",
+  fontWeight: 900,
+  lineHeight: 1.1,
+  fontVariantNumeric: "tabular-nums",
+  textShadow: "0 0 12px currentColor",
+  animation: "gs-left .3s cubic-bezier(.2,1.8,.4,1)",
+  "@keyframes gs-left": {
+    from: { transform: "scale(1.5)", opacity: 0.3 },
+    to: { transform: "scale(1)", opacity: 1 },
+  },
+});
+
+const flipNowStyle = css({
+  fontWeight: 900,
+  color: SHOT_COLORS.flip,
+  textShadow: `0 0 10px ${SHOT_COLORS.flip}`,
+  animation: "gs-home-blink .35s ease-in-out infinite alternate",
+});
+
+/** The button the advice points at: lit, and breathing, so the eye goes to it. */
+const suggestedStyle = css({
+  borderColor: "currentColor",
+  boxShadow: "0 0 18px currentColor, inset 0 0 14px currentColor",
+  animation: "gs-suggest .6s ease-in-out infinite alternate",
+  "@keyframes gs-suggest": {
+    to: { boxShadow: "0 0 6px currentColor, inset 0 0 4px currentColor" },
+  },
 });

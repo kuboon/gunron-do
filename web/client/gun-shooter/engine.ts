@@ -22,7 +22,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 
 import { EnemyView, faceColors } from "./enemy-view.ts";
 import { Fx } from "./fx.ts";
-import { type Enemy, EYE, game, type GameEvent } from "./game.ts";
+import { type Enemy, EYE, game, type GameEvent, type Orb } from "./game.ts";
 import type { Shot } from "./groups.ts";
 import { DANGER, GOLD, NIGHT, SHOT_COLORS, SPECIES_COLORS } from "./palette.ts";
 import { sound } from "./sound.ts";
@@ -337,9 +337,48 @@ export function start(host: HTMLElement): () => void {
       .filter((e) => offAim(e, coarse ? 0.1 : 0.06) < 0)
       .sort((a, b) => dist2(a.pos) - dist2(b.pos));
 
+  /** The orb nearest the crosshair, within a cone generous enough to snap-shoot one. */
+  const pickOrb = (assist = coarse ? 0.12 : 0.07): Orb | null => {
+    let best: Orb | null = null;
+    let bestD = 0;
+    for (const orb of game.orbs) {
+      tmp.set(...orb.pos).sub(eye);
+      const d = forward.angleTo(tmp) - Math.atan2(0.7, tmp.length()) - assist;
+      if (d < 0 && (best === null || d < bestD)) {
+        best = orb;
+        bestD = d;
+      }
+    }
+    return best;
+  };
+
+  // The orbs: a hot red core in a spinning cage, each its own little mesh.
+  const orbViews = new Map<number, THREE.Group>();
+  const orbCore = new THREE.SphereGeometry(0.32, 16, 10);
+  const orbCage = new THREE.IcosahedronGeometry(0.62, 0);
+  const orbCoreMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(DANGER).multiplyScalar(2.2),
+    toneMapped: false,
+  });
+  const orbCageMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(0xff9a3d).multiplyScalar(1.8),
+    wireframe: true,
+    toneMapped: false,
+  });
+
   // --- events ------------------------------------------------------------------------------------
 
   const muzzle = new THREE.Vector3();
+  const removeOrb = (id: number) => {
+    const view = orbViews.get(id);
+    if (!view) return;
+    scene.remove(view);
+    for (const child of view.children) {
+      if (child instanceof THREE.Sprite) child.material.dispose();
+    }
+    orbViews.delete(id);
+  };
+
   const handle = (ev: GameEvent) => {
     switch (ev.type) {
       case "spawn": {
@@ -375,6 +414,18 @@ export function start(host: HTMLElement): () => void {
         fx.ring(tmp, color, ev.enemy.radius * 0.8, ev.enemy.radius * 2.2, 0.35);
         addTrauma(0.08);
         sound.hit();
+        // Warmer or colder: every shot says how far home it is now.
+        if (!ev.home) {
+          const lift = tmp2.set(...ev.enemy.pos).add(
+            tmp.set(ev.enemy.radius * 1.1, ev.enemy.radius * 0.8, 0),
+          );
+          fx.popup(
+            lift.clone(),
+            `あと ${ev.left} ${ev.gain > 0 ? "▼" : "▲"}`,
+            ev.gain > 0 ? "#7dff9a" : DANGER,
+            "md",
+          );
+        }
         if (ev.home) {
           setTimeout(() => {
             if (!ev.enemy.alive || ev.enemy.state !== 0) return;
@@ -406,6 +457,55 @@ export function start(host: HTMLElement): () => void {
       case "miss":
         if (ev.shot === "cannon") sound.miss();
         break;
+      case "orb": {
+        const view = new THREE.Group();
+        view.add(
+          new THREE.Mesh(orbCore, orbCoreMat),
+          new THREE.Mesh(orbCage, orbCageMat),
+        );
+        const halo = new THREE.Sprite(
+          new THREE.SpriteMaterial({
+            map: glow,
+            color: new THREE.Color(DANGER),
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+          }),
+        );
+        halo.scale.setScalar(2.2);
+        view.add(halo);
+        view.position.set(...ev.orb.pos);
+        orbViews.set(ev.orb.id, view);
+        scene.add(view);
+        tmp.set(...ev.orb.pos);
+        fx.flash(tmp, DANGER, 1.2, 0.25);
+        fx.burst(tmp, 0xff9a3d, 14, { speed: 5, size: 0.18, life: 0.4 });
+        sound.enemyShot();
+        break;
+      }
+      case "pop": {
+        tmp.set(...ev.orb.pos);
+        fx.burst(tmp, 0xff9a3d, 50, { speed: 12, size: 0.22, life: 0.5 });
+        fx.burst(tmp, 0xffffff, 16, { speed: 6, size: 0.16, life: 0.3 });
+        fx.ring(tmp, DANGER, 0.3, 2.6, 0.3);
+        fx.popup(tmp.clone(), `+${ev.points}`, "#ffb36b", "sm");
+        addTrauma(0.1);
+        sound.pop();
+        removeOrb(ev.orb.id);
+        break;
+      }
+      case "struck": {
+        removeOrb(ev.orb.id);
+        damage = 0.9;
+        addTrauma(0.75);
+        aberration = 0.03;
+        flash = reduced ? 0.1 : 0.3;
+        (grade.uniforms.uFlashColor.value as THREE.Color).set(DANGER);
+        sound.breach();
+        break;
+      }
       case "cannon": {
         let big = false;
         ev.kills.forEach((kill, i) => {
@@ -610,7 +710,11 @@ export function start(host: HTMLElement): () => void {
       gun.muzzle.getWorldPosition(muzzle);
       if (cmd === "cannon") {
         const hits = beamHits();
-        if (!game.cannon(hits)) continue;
+        const orbs = game.orbs.filter((o) => {
+          tmp.set(...o.pos).sub(eye);
+          return forward.angleTo(tmp) < Math.atan2(0.8, tmp.length()) + 0.06;
+        });
+        if (!game.cannon(hits, orbs)) continue;
         const end = hits.length > 0
           ? tmp.set(...hits[hits.length - 1].pos).add(
             forward.clone().multiplyScalar(40),
@@ -640,10 +744,14 @@ export function start(host: HTMLElement): () => void {
         aberration = Math.max(aberration, 0.012);
         sound.cannon();
       } else {
-        const hit = pickTarget();
-        if (!game.fire(cmd, hit)) continue;
+        // An orb in the sights takes the round: it is the thing about to hurt.
+        const orb = pickOrb();
+        const hit = orb === null ? pickTarget() : null;
+        if (orb !== null ? !game.shootOrb(orb) : !game.fire(cmd, hit)) continue;
         const color = SHOT_COLORS[cmd];
-        const end = hit
+        const end = orb !== null
+          ? tmp.set(...orb.pos)
+          : hit
           ? tmp.set(...hit.pos)
           : tmp.copy(eye).add(forward.clone().multiplyScalar(80));
         fx.beam(muzzle, end, color, 0.12, 0.14, 1);
@@ -663,6 +771,17 @@ export function start(host: HTMLElement): () => void {
 
     game.update(dt);
     for (const ev of game.drain()) handle(ev);
+
+    for (const orb of game.orbs) {
+      const view = orbViews.get(orb.id);
+      if (!view) continue;
+      view.position.set(...orb.pos);
+      view.rotation.set(clock * 3.1, clock * 4.3, 0);
+    }
+    if (orbViews.size !== game.orbs.length) {
+      const live = new Set(game.orbs.map((o) => o.id));
+      for (const id of [...orbViews.keys()]) if (!live.has(id)) removeOrb(id);
+    }
 
     // A view whose enemy the rules no longer have — a new run started over the old one — goes
     // quietly. Kills and breaches take theirs out above, with their fireworks.
@@ -742,34 +861,54 @@ export function start(host: HTMLElement): () => void {
     }
 
     const seen = new Set<number>();
-    for (const enemy of game.enemies) {
-      tmp.set(...enemy.pos).project(camera);
+    const marks = [
+      ...game.enemies.map((enemy) => {
+        const danger = 1 -
+          Math.min(1, Math.hypot(enemy.pos[0], enemy.pos[2]) / 30);
+        return {
+          id: enemy.id,
+          pos: enemy.pos,
+          color: danger > 0.6 ? DANGER : SPECIES_COLORS[enemy.species.id],
+          danger,
+          blink: danger > 0.6,
+        };
+      }),
+      // An orb from behind would be a hit the player never had a chance at, so every one gets
+      // an arrow, red and blinking.
+      ...game.orbs.map((orb) => ({
+        id: orb.id,
+        pos: orb.pos,
+        color: DANGER,
+        danger: 0.6,
+        blink: true,
+      })),
+    ];
+    for (const mark of marks) {
+      tmp.set(...mark.pos).project(camera);
       const onScreen = tmp.z < 1 && Math.abs(tmp.x) < 0.95 &&
         Math.abs(tmp.y) < 0.92;
       if (onScreen) continue;
-      seen.add(enemy.id);
-      let el = arrows.get(enemy.id);
+      seen.add(mark.id);
+      let el = arrows.get(mark.id);
       if (!el) {
         el = document.createElement("div");
         el.className = "gs-arrow";
         overlay.append(el);
-        arrows.set(enemy.id, el);
+        arrows.set(mark.id, el);
       }
-      // Direction on screen: from the enemy's position in camera space.
-      tmp2.set(...enemy.pos).applyMatrix4(camera.matrixWorldInverse);
+      // Direction on screen: from the position in camera space.
+      tmp2.set(...mark.pos).applyMatrix4(camera.matrixWorldInverse);
       const ang = Math.atan2(-tmp2.y, tmp2.x);
       const r = Math.min(w, h) * 0.42;
       const x = w / 2 +
         Math.cos(ang) * Math.min(r * (w / Math.min(w, h)), w / 2 - 28);
       const y = h / 2 +
         Math.sin(ang) * Math.min(r * (h / Math.min(w, h)), h / 2 - 28);
-      const d = Math.hypot(enemy.pos[0], enemy.pos[2]);
-      const danger = 1 - Math.min(1, d / 30);
       el.style.transform = `translate(${x}px, ${y}px) rotate(${ang}rad) scale(${
-        0.8 + danger * 0.6
+        0.8 + mark.danger * 0.6
       })`;
-      el.style.color = danger > 0.6 ? DANGER : SPECIES_COLORS[enemy.species.id];
-      el.classList.toggle("gs-danger", danger > 0.6);
+      el.style.color = mark.color;
+      el.classList.toggle("gs-danger", mark.blink);
     }
     for (const [id, el] of arrows) {
       if (!seen.has(id)) {

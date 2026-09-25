@@ -78,6 +78,18 @@ class Sound {
     );
   }
 
+  /** An enemy firing an orb: a low warble, so it is heard from behind. */
+  enemyShot(): void {
+    this.#tone({ type: "sawtooth", from: 220, to: 520, dur: 0.18, gain: 0.08 });
+    this.#tone({ type: "square", from: 330, to: 160, dur: 0.22, gain: 0.05 });
+  }
+
+  /** An orb popped. */
+  pop(): void {
+    this.#tone({ type: "square", from: 1800, to: 600, dur: 0.08, gain: 0.1 });
+    this.#noiseBurst({ dur: 0.12, gain: 0.14, freq: 3000 });
+  }
+
   /** Nothing in the way. */
   miss(): void {
     this.#noiseBurst({ dur: 0.05, gain: 0.05, freq: 6000 });

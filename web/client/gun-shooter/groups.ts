@@ -21,10 +21,20 @@
  * is how many a perfect player needs.
  */
 
-import { axisAngle, IDENTITY, mul, type Quat, sameRotation } from "./quat.ts";
+import {
+  axisAngle,
+  dot,
+  IDENTITY,
+  mul,
+  type Quat,
+  rotate,
+  sameRotation,
+  type Vec3,
+} from "./quat.ts";
 import {
   cube,
   dodecahedron,
+  faceNormal,
   plate,
   type Solid,
   tetrahedron,
@@ -60,6 +70,16 @@ export interface Species {
   diameter: number;
   /** How many degrees one twist is. */
   twistDegrees: number;
+  /**
+   * Where the ⇅ slot is: the direction, from the enemy's middle, of the face a flip brings round
+   * to the front. The same whatever state the enemy is in, because the flip turns about an axis
+   * fixed towards the player — which is what lets the screen draw it as a fixed green frame.
+   */
+  slot: Vec3;
+  /** In the home pose, which face sits in the ⇅ slot — so the frame can be drawn as its outline. */
+  slotFace: number;
+  /** For each ring of faces, where on it a flip lifts a face furthest — see {@link guide}. */
+  ladder: readonly Rung[];
 }
 
 /**
@@ -104,6 +124,8 @@ function species(
     }
   }
 
+  const slot = rotate(shots.flip, [0, 0, 1]);
+
   return {
     id,
     label,
@@ -116,6 +138,9 @@ function species(
     depth,
     diameter: Math.max(...depth),
     twistDegrees: 360 / solid.sides,
+    slot,
+    slotFace: nearestFace(solid, slot),
+    ladder: buildLadder(solid, shots.flip),
   };
 }
 
@@ -156,4 +181,89 @@ export function wayHome(s: Species, i: number): Shot[] {
     at = s.next[step][at];
   }
   return path;
+}
+
+/** The face of a solid, in its home pose, whose outward direction is closest to `dir`. */
+function nearestFace(solid: Solid, dir: Vec3): number {
+  let best = 0;
+  let bestDot = -Infinity;
+  solid.faces.forEach((face, i) => {
+    const n = faceNormal(solid.vertices, face);
+    const d = dot(n, dir);
+    if (d > bestDot) {
+      bestDot = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
+/** What to do next, and where the green frame goes. */
+export interface Guide {
+  /**
+   * - `home`: it is at `e`. Fire the e砲.
+   * - `upright`: the `e` face is at the front but not upright. Twist it upright.
+   * - `twist`: twist the `e` face round into the green frame.
+   * - `flip`: the `e` face is in the green frame. Flip.
+   */
+  advice: "home" | "upright" | "twist" | "flip";
+  /** The face position, as a face of the home pose, the green frame outlines — or `null`. */
+  frame: number | null;
+}
+
+/**
+ * The move to make next, in a form a player can follow by looking.
+ *
+ * Every rotation is "which face is at the front, and which way up". A twist turns the solid about
+ * the axis pointing at the player, so it carries every face round a ring at a fixed depth; only a
+ * flip moves a face from one ring to another. So on each ring there is one position from which a
+ * flip lifts a face furthest towards the front, and the green frame marks it on whichever ring the
+ * `e` face is on: twist the `e` into the frame, flip, and repeat until it is at the front — then
+ * twist it upright. On the plates, the tetrahedron and the cube that is one or two flips; on the
+ * dodecahedron it can be three.
+ *
+ * This is always a way home, not always the shortest one; the distance shown beside it is.
+ *
+ * @param s The kind of enemy
+ * @param state Its element
+ */
+export function guide(s: Species, state: number): Guide {
+  if (state === 0) return { advice: "home", frame: null };
+  const n = rotate(s.elements[state], [0, 0, 1]);
+  if (n[2] > 1 - 1e-6) return { advice: "upright", frame: null };
+  const frame = s.ladder.find((rung) => Math.abs(rung.z - n[2]) < 1e-4);
+  if (frame === undefined) return { advice: "twist", frame: null };
+  const at = dot(n, frame.dir) > 1 - 1e-6;
+  return { advice: at ? "flip" : "twist", frame: frame.face };
+}
+
+/**
+ * For each ring of faces below the front, the position a flip lifts highest.
+ *
+ * @param solid The body, in its home pose
+ * @param flip The flip's rotation
+ */
+function buildLadder(solid: Solid, flip: Quat): Rung[] {
+  const normals = solid.faces.map((face) => faceNormal(solid.vertices, face));
+  const rungs: Rung[] = [];
+  normals.forEach((n, i) => {
+    if (n[2] > 1 - 1e-6) return;
+    const lift = rotate(flip, n)[2];
+    const rung = rungs.find((r) => Math.abs(r.z - n[2]) < 1e-4);
+    if (rung === undefined) rungs.push({ z: n[2], face: i, dir: n, lift });
+    else if (lift > rung.lift + 1e-6) {
+      Object.assign(rung, { face: i, dir: n, lift });
+    }
+  });
+  return rungs;
+}
+
+interface Rung {
+  /** How far towards the player this ring of faces points. */
+  z: number;
+  /** The face at the rung's best position, in the home pose. */
+  face: number;
+  dir: Vec3;
+  /** How far towards the player a flip carries it. */
+  lift: number;
 }

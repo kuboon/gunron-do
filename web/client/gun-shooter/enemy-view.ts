@@ -16,18 +16,28 @@
 import * as THREE from "three";
 
 import type { Enemy } from "./game.ts";
-import type { Species, SpeciesId } from "./groups.ts";
-import { FACE_COLORS, GOLD, SPECIES_COLORS } from "./palette.ts";
+import { guide, type Species, type SpeciesId } from "./groups.ts";
+import { FACE_COLORS, GOLD, SHOT_COLORS, SPECIES_COLORS } from "./palette.ts";
 import type { Quat } from "./quat.ts";
 import { faceCentre, faceNormal } from "./solids.ts";
 
 /** The parts of a species' mesh that every enemy of that kind shares. */
 interface Kit {
+  /** From the middle, out through the `e` face to {@link REACH}: the needle that says where it points. */
+  needle: THREE.Vector3;
   faces: THREE.BufferGeometry;
   eFace: THREE.BufferGeometry;
   edges: THREE.BufferGeometry;
   colors: string[];
 }
+
+/**
+ * How far out, in circumradii, the gold needle's tip and the green ring sit.
+ *
+ * Both at the same distance from the middle, so "the tip is in the ring" is something the eye can
+ * see: outside the solid, where neither is hidden behind it.
+ */
+const REACH = 1.5;
 
 const kits = new Map<SpeciesId, Kit>();
 let eTexture: THREE.Texture | null = null;
@@ -48,6 +58,16 @@ export class EnemyView {
   readonly #halo: THREE.Sprite;
   readonly #lock: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   readonly #axis: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>;
+  readonly #ghostMat: THREE.MeshBasicMaterial;
+  readonly #needleMat: THREE.MeshBasicMaterial;
+  readonly #socket: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  readonly #orbit: THREE.LineLoop<
+    THREE.BufferGeometry,
+    THREE.LineDashedMaterial
+  >;
+  #frameFace: number | null = null;
+  #frameShown = 0;
+  #frameHot = 0;
 
   #from = new THREE.Quaternion();
   #to = new THREE.Quaternion();
@@ -99,6 +119,70 @@ export class EnemyView {
     shell.scale.setScalar(1.09);
     this.body.add(faces, eFace, edges, shell);
 
+    // The x-ray: the `e` glyph and a gold needle out of its face, drawn through the body, so where
+    // the `e` face is can be read from any side. Faint behind, full in front.
+    this.#ghostMat = new THREE.MeshBasicMaterial({
+      map: eGlyph(),
+      transparent: true,
+      opacity: 0.4,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+    });
+    const ghost = new THREE.Mesh(k.eFace, this.#ghostMat);
+    ghost.renderOrder = 10;
+    this.#needleMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(GOLD).multiplyScalar(1.6),
+      transparent: true,
+      opacity: 0.85,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const needle = new THREE.Mesh(needleGeometry(k.needle), this.#needleMat);
+    needle.renderOrder = 11;
+    const tip = new THREE.Mesh(
+      new THREE.SphereGeometry(0.13, 12, 8),
+      this.#needleMat,
+    );
+    tip.position.copy(k.needle);
+    tip.renderOrder = 11;
+    this.body.add(ghost, needle, tip);
+
+    // The green ring, and the circle a twist carries the needle's tip round. Both belong to the
+    // frame, not the body: where a face has to be for ⇅ to lift it is fixed relative to the
+    // player, whatever the solid is doing. Twist the gold tip round the circle into the ring, ⇅.
+    const lime = new THREE.Color(SHOT_COLORS.flip);
+    this.#socket = new THREE.Mesh(
+      new THREE.RingGeometry(0.2, 0.3, 32),
+      new THREE.MeshBasicMaterial({
+        color: lime.clone().multiplyScalar(2.2),
+        transparent: true,
+        opacity: 0,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
+    );
+    this.#socket.renderOrder = 12;
+    this.#orbit = new THREE.LineLoop(
+      circle(64),
+      new THREE.LineDashedMaterial({
+        color: lime.clone().multiplyScalar(1.4),
+        dashSize: 0.12,
+        gapSize: 0.08,
+        transparent: true,
+        opacity: 0,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    this.#orbit.computeLineDistances();
+    this.#orbit.renderOrder = 8;
+
     // The halo and the lock ring belong to the frame, not the body: they face the player whatever
     // the solid is doing.
     this.#halo = new THREE.Sprite(
@@ -136,7 +220,14 @@ export class EnemyView {
         toneMapped: false,
       }),
     );
-    this.frame.add(this.#halo, this.body, this.#lock, this.#axis);
+    this.frame.add(
+      this.#halo,
+      this.body,
+      this.#lock,
+      this.#axis,
+      this.#orbit,
+      this.#socket,
+    );
     this.frame.scale.setScalar(enemy.radius);
 
     const q = enemy.species.elements[enemy.state];
@@ -216,9 +307,45 @@ export class EnemyView {
     this.#lock.rotation.z = time * 2.4;
     this.#lock.scale.setScalar(1 + (1 - this.#home) * 0.8);
     this.#axis.material.opacity = this.#spin < 1 ? (1 - this.#spin) * 1.2 : 0;
+
+    // The green frame shows once the turn has landed, on whichever ring the `e` face is on, and
+    // blazes when the `e` face is sitting in it — that is the moment for ⇅.
+    const g = guide(this.enemy.species, this.enemy.state);
+    const settled = this.#spin >= 1;
+    if (settled && g.frame !== this.#frameFace && g.frame !== null) {
+      const { vertices, faces } = this.enemy.species.solid;
+      const [x, y, z] = faceNormal(vertices, faces[g.frame]);
+      this.#socket.position.set(x * REACH, y * REACH, z * REACH);
+      const r = Math.hypot(x, y) * REACH;
+      this.#orbit.position.set(0, 0, z * REACH);
+      this.#orbit.scale.set(Math.max(r, 1e-3), Math.max(r, 1e-3), 1);
+    }
+    if (settled) this.#frameFace = g.frame;
+    const want = settled && g.frame !== null ? 1 : 0;
+    this.#frameShown += (want - this.#frameShown) * Math.min(1, dt * 10);
+    this.#frameHot += ((g.advice === "flip" ? 1 : 0) - this.#frameHot) *
+      Math.min(1, dt * 10);
+    const flicker = 0.75 + 0.25 * Math.sin(time * 10);
+    this.#socket.material.opacity = this.#frameShown *
+      (0.7 + this.#frameHot * 0.3 * flicker);
+    this.#socket.scale.setScalar(1 + this.#frameHot * 0.35 * flicker);
+    this.#orbit.material.opacity = this.#frameShown * (1 - this.#frameHot) *
+      0.5;
+
+    // The ghost is for when the `e` face is turned away; facing the player the real one shows.
+    const facing =
+      new THREE.Vector3(0, 0, 1).applyQuaternion(this.body.quaternion).z;
+    this.#ghostMat.opacity = 0.55 * Math.max(0, Math.min(1, 1 - facing * 1.5));
+    this.#needleMat.opacity = 0.9 - this.#home * 0.6;
   }
 
   dispose(): void {
+    this.#ghostMat.dispose();
+    this.#needleMat.dispose();
+    this.#socket.geometry.dispose();
+    this.#socket.material.dispose();
+    this.#orbit.geometry.dispose();
+    this.#orbit.material.dispose();
     this.#faceMat.dispose();
     this.#eMat.dispose();
     this.#edgeMat.dispose();
@@ -324,7 +451,15 @@ function kit(species: Species): Kit {
   const edgeGeo = new THREE.BufferGeometry();
   edgeGeo.setAttribute("position", new THREE.Float32BufferAttribute(lines, 3));
 
-  const made = { faces: faceGeo, eFace: eGeo, edges: edgeGeo, colors };
+  const needle = new THREE.Vector3(...n).multiplyScalar(REACH);
+
+  const made = {
+    faces: faceGeo,
+    eFace: eGeo,
+    edges: edgeGeo,
+    colors,
+    needle,
+  };
   kits.set(species.id, made);
   return made;
 }
@@ -363,4 +498,30 @@ function eGlyph(): THREE.Texture {
   texture.colorSpace = THREE.SRGBColorSpace;
   eTexture = texture;
   return texture;
+}
+
+/** A tapered spike from the middle of the solid out to a point: thick inside, sharp at the tip. */
+function needleGeometry(to: THREE.Vector3): THREE.BufferGeometry {
+  const length = to.length();
+  const geo = new THREE.ConeGeometry(0.07, length, 8, 1, true);
+  geo.translate(0, length / 2, 0);
+  geo.applyQuaternion(
+    new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      to.clone().normalize(),
+    ),
+  );
+  return geo;
+}
+
+/** A unit circle in the XY plane, as a line loop. */
+function circle(segments: number): THREE.BufferGeometry {
+  const points: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    points.push(Math.cos(a), Math.sin(a), 0);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+  return geo;
 }

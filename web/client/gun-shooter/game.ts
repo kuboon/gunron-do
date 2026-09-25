@@ -19,6 +19,8 @@
 
 import {
   atDepth,
+  type Guide,
+  guide,
   type Shot,
   SHOTS,
   SPECIES,
@@ -66,7 +68,37 @@ export interface Enemy {
   sway: number;
   boss: boolean;
   alive: boolean;
+  /** Seconds until it next fires an orb, or `Infinity` in a wave where nobody does. */
+  fireIn: number;
 }
+
+/** An energy orb an enemy fired at the player. Any round pops it. */
+export interface Orb {
+  id: number;
+  pos: Vec3;
+  /** Units per second. */
+  vel: Vec3;
+  alive: boolean;
+}
+
+/** What the HUD says about the enemy under the crosshair. */
+export interface Guidance {
+  /** Fewest shots home. */
+  left: number;
+  /** What to do, and where the green frame is. */
+  guide: Guide;
+  /** The exact next shot — only on the first waves, while the player is learning to read. */
+  next: Shot | null;
+}
+
+/** How close an orb gets before it hits. */
+const ORB_HIT_RADIUS = 1.4;
+
+/** How fast an orb flies. */
+const ORB_SPEED = 7;
+
+/** What popping one is worth. */
+const ORB_POINTS = 25;
 
 /** What the renderer is told happened. */
 export type GameEvent =
@@ -78,7 +110,14 @@ export type GameEvent =
     from: Quat;
     to: Quat;
     home: boolean;
+    /** Shots home, after this one. */
+    left: number;
+    /** How many closer this shot brought it: 1, or -1 for a step the wrong way. */
+    gain: number;
   }
+  | { type: "orb"; orb: Orb; from: Enemy }
+  | { type: "pop"; orb: Orb; points: number }
+  | { type: "struck"; orb: Orb }
   | { type: "miss"; shot: Shot | "cannon" }
   | { type: "cannon"; kills: Kill[]; bounced: Enemy[] }
   | { type: "breach"; enemy: Enemy }
@@ -111,6 +150,8 @@ interface Wave {
   /** Seconds between arrivals. */
   gap: number;
   boss?: boolean;
+  /** Seconds between each enemy's orbs, or nothing for a wave where they hold fire. */
+  orbs?: number;
 }
 
 const WAVES: readonly Wave[] = [
@@ -137,6 +178,7 @@ const WAVES: readonly Wave[] = [
     speed: 1.0,
     arc: 0.9,
     gap: 2.4,
+    orbs: 7,
   },
   {
     title: "混成部隊",
@@ -145,6 +187,7 @@ const WAVES: readonly Wave[] = [
     speed: 1.15,
     arc: 1.6,
     gap: 1.8,
+    orbs: 6,
   },
   {
     title: "S₄ 立方体",
@@ -153,6 +196,7 @@ const WAVES: readonly Wave[] = [
     speed: 1.0,
     arc: 1.2,
     gap: 2.6,
+    orbs: 6.5,
   },
   {
     title: "総力戦",
@@ -161,6 +205,7 @@ const WAVES: readonly Wave[] = [
     speed: 1.25,
     arc: Math.PI,
     gap: 1.5,
+    orbs: 5,
   },
   {
     title: "A₅ 正十二面体",
@@ -169,6 +214,7 @@ const WAVES: readonly Wave[] = [
     speed: 0.7,
     arc: 0.8,
     gap: 3,
+    orbs: 3.5,
     boss: true,
   },
 ];
@@ -178,6 +224,7 @@ type Listener = () => void;
 class Game {
   phase: Phase = "title";
   enemies: Enemy[] = [];
+  orbs: Orb[] = [];
   life = MAX_LIFE;
   score = 0;
   best = 0;
@@ -221,6 +268,7 @@ class Game {
   start(): void {
     this.phase = "playing";
     this.enemies = [];
+    this.orbs = [];
     this.life = MAX_LIFE;
     this.score = 0;
     this.combo = 0;
@@ -314,6 +362,20 @@ class Game {
   }
 
   /**
+   * An element round at an orb: any round pops it.
+   *
+   * @param orb What the aim is on
+   * @returns Whether the gun was ready
+   */
+  shootOrb(orb: Orb): boolean {
+    if (this.phase !== "playing" || this.shotCooldown > 0) return false;
+    this.shotCooldown = SHOT_COOLDOWN;
+    this.#pop(orb);
+    this.#emit();
+    return true;
+  }
+
+  /**
    * The e砲: every enemy in the beam, at once.
    *
    * It goes through everything it hits. The ones at `e` are destroyed, and each after the first
@@ -321,11 +383,13 @@ class Game {
    * further round for it.
    *
    * @param hit The enemies in the beam, nearest first
+   * @param orbs The orbs in it, which it pops on the way through
    * @returns Whether it was ready
    */
-  cannon(hit: readonly Enemy[]): boolean {
+  cannon(hit: readonly Enemy[], orbs: readonly Orb[] = []): boolean {
     if (this.phase !== "playing" || this.cannonCooldown > 0) return false;
     this.cannonCooldown = CANNON_COOLDOWN;
+    for (const orb of orbs) this.#pop(orb);
 
     const live = hit.filter((e) => e.alive);
     if (live.length === 0) {
@@ -425,6 +489,38 @@ class Game {
       if (this.target !== null && !this.target.alive) this.target = null;
     }
 
+    // Orbs: fired on each enemy's own clock, flown straight, popped by any round.
+    for (const enemy of this.enemies) {
+      enemy.fireIn -= dt;
+      if (enemy.fireIn <= 0) {
+        this.#fireOrb(enemy);
+        enemy.fireIn = (this.#current.orbs ?? Infinity) *
+          (0.8 + Math.random() * 0.4);
+      }
+    }
+    for (const orb of this.orbs) {
+      orb.pos = [
+        orb.pos[0] + orb.vel[0] * dt,
+        orb.pos[1] + orb.vel[1] * dt,
+        orb.pos[2] + orb.vel[2] * dt,
+      ];
+      const d = Math.hypot(
+        orb.pos[0] - EYE[0],
+        orb.pos[1] - EYE[1],
+        orb.pos[2] - EYE[2],
+      );
+      if (d < ORB_HIT_RADIUS) {
+        orb.alive = false;
+        this.life -= 1;
+        this.combo = 0;
+        this.#events.push({ type: "struck", orb });
+        changed = true;
+      }
+    }
+    if (this.orbs.some((o) => !o.alive)) {
+      this.orbs = this.orbs.filter((o) => o.alive);
+    }
+
     if (this.life <= 0) {
       this.life = 0;
       this.phase = "over";
@@ -443,7 +539,10 @@ class Game {
     }
 
     // The wave is over once everyone has come and gone; a breath, then the next.
-    if (this.#queue.length === 0 && this.enemies.length === 0) {
+    if (
+      this.#queue.length === 0 && this.enemies.length === 0 &&
+      this.orbs.length === 0
+    ) {
       if (this.#breather === 0) {
         this.#events.push({ type: "clear", wave: this.wave });
         this.clearing = true;
@@ -464,12 +563,19 @@ class Game {
     if (changed) this.#emit();
   }
 
-  /** A hint for the easy waves: how many turns home, and which one comes first. */
-  get hint(): { left: number; next: Shot | null } | null {
+  /**
+   * What the HUD says about the enemy under the crosshair: how far it is from home, what to do
+   * next and where the green frame is — and, on the first two waves only, the exact next shot.
+   */
+  get guidance(): Guidance | null {
     const t = this.target;
-    if (t === null || this.wave >= 2 || this.lap > 0) return null;
-    const path = wayHome(t.species, t.state);
-    return { left: path.length, next: path[0] ?? null };
+    if (t === null) return null;
+    const learning = this.wave < 2 && this.lap === 0;
+    return {
+      left: t.species.depth[t.state],
+      guide: guide(t.species, t.state),
+      next: learning ? (wayHome(t.species, t.state)[0] ?? null) : null,
+    };
   }
 
   /** The wave's name, for the HUD. */
@@ -490,6 +596,7 @@ class Game {
   #turn(enemy: Enemy, shot: Shot): void {
     const s = enemy.species;
     const from = s.elements[enemy.state];
+    const before = s.depth[enemy.state];
     enemy.state = s.next[shot][enemy.state];
     enemy.taken += 1;
     this.#events.push({
@@ -499,6 +606,8 @@ class Game {
       from,
       to: s.elements[enemy.state],
       home: enemy.state === 0,
+      left: s.depth[enemy.state],
+      gain: before - s.depth[enemy.state],
     });
   }
 
@@ -545,9 +654,43 @@ class Game {
       sway: Math.random() * 10,
       boss,
       alive: true,
+      // The first shot comes a little after arriving, so an enemy is seen before it shoots.
+      fireIn: w.orbs === undefined
+        ? Infinity
+        : w.orbs * (0.6 + Math.random() * 0.6),
     };
     this.enemies.push(enemy);
     this.#events.push({ type: "spawn", enemy });
+  }
+
+  #pop(orb: Orb): void {
+    if (!orb.alive) return;
+    orb.alive = false;
+    this.score += ORB_POINTS;
+    this.orbs = this.orbs.filter((o) => o.alive);
+    this.#events.push({ type: "pop", orb, points: ORB_POINTS });
+  }
+
+  /** An enemy firing: an orb, straight at the player's eye. */
+  #fireOrb(enemy: Enemy): void {
+    const [x, y, z] = enemy.pos;
+    const dx = EYE[0] - x;
+    const dy = EYE[1] - y;
+    const dz = EYE[2] - z;
+    const l = Math.hypot(dx, dy, dz) || 1;
+    const k = ORB_SPEED * (1 + 0.1 * this.lap) / l;
+    const orb: Orb = {
+      id: this.#nextId++,
+      pos: [
+        x + dx / l * enemy.radius,
+        y + dy / l * enemy.radius,
+        z + dz / l * enemy.radius,
+      ],
+      vel: [dx * k, dy * k, dz * k],
+      alive: true,
+    };
+    this.orbs.push(orb);
+    this.#events.push({ type: "orb", orb, from: enemy });
   }
 
   #emit(): void {

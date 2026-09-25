@@ -243,6 +243,18 @@ the player, and a half turn about the axis under the front face's bottom edge.
 Bring an enemy to `e` and the e砲 finishes it; fire the e砲 at anything else and
 it bounces, knocking the enemy one more turn round.
 
+What makes it playable rather than a guessing game is that the state can be read
+off the screen. Every rotation is "which face is at the front, and which way
+up", and a twist only moves faces round a ring at a fixed depth; only the flip
+moves one between rings. So a gold needle marks where the `e` face points (drawn
+through the body), a green ring marks the spot on its current ring from which ⇅
+lifts it highest, and a dashed green circle marks the path a twist moves the
+needle along: twist the needle into the ring, flip, repeat, twist upright.
+`guide()` in `groups.ts` works that out, and following it always reaches `e` —
+on D₃, D₄, A₄ and S₄ in exactly the optimal number of shots on average, on A₅ in
+4.87 against 4.63. The HUD adds the distance home after every shot and lights the
+button the advice points at.
+
 The rules are plain numbers. `solids.ts` builds each body in its home pose,
 `groups.ts` closes the two shots under composition — so the elements, a table of
 what each shot does to each, and every element's distance from `e` are worked out
