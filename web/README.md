@@ -137,6 +137,19 @@ web/
     pages/
       index.tsx      # home — the list of games
       rules.tsx      # any game's rules, around a rendered Markdown body
+    gun-shooter/     # everything 群シューター is in the browser
+      page.tsx       # the screen: one island, the arena and its HUD
+      quat.ts        # the rotation arithmetic the rules are decided on
+      solids.ts      # the five enemy bodies, each set up in its home pose
+      groups.ts      # the groups the two shots generate, closed once at load
+      game.ts        # waves, shots, the e砲, the score — and the one instance
+      engine.ts      # three.js: aim, input, post-processing, all the juice
+      enemy-view.ts  # one enemy's mesh, turned to the element it is in
+      fx.ts          # sparks, shards, shockwaves, beams, popups
+      stage.ts       # the grid, the sun, the stars
+      sound.ts       # every sound, synthesised
+      islands/
+        gun-arena.tsx  # the arena's box, and the HUD over it
     tetra-do/        # everything テトラ道 is in the browser
       page.tsx       # the screen: six islands and where they go
       rotation.ts    # the group: six moves, and the arithmetic that composes them
@@ -160,6 +173,8 @@ web/
     router.ts        # the wiring — routes to pages, plus the rest of the site
     assets.ts        # client/ compiled as one graph
     rules.ts         # the rules: the Markdown, and what turns it into a page
+    gun-shooter/
+      rules.md       # 群シューター's rules
     tetra-do/        # everything テトラ道 is on the server
       rules.md       # its rules
       art.ts         # the picture on its social card
@@ -216,6 +231,34 @@ drops the site's header and footer: on a phone the board should be as wide as
 the phone. It is also the one page that overrides the shell's viewport meta,
 because `env(safe-area-inset-*)` reads `0px` until a page asks for
 `viewport-fit=cover`.
+
+## 群シューター
+
+A first-person shooter where the targets are groups. Each enemy is a solid — a
+triangle or square plate, a tetrahedron, a cube, a dodecahedron — whose
+rotations form D₃, D₄, A₄, S₄ or A₅, and its state is one element of that group:
+the rotation from its home pose, the `e` face upright and facing the player. The
+gun fires two generators (and one's inverse): a twist about the axis pointing at
+the player, and a half turn about the axis under the front face's bottom edge.
+Bring an enemy to `e` and the e砲 finishes it; fire the e砲 at anything else and
+it bounces, knocking the enemy one more turn round.
+
+The rules are plain numbers. `solids.ts` builds each body in its home pose,
+`groups.ts` closes the two shots under composition — so the elements, a table of
+what each shot does to each, and every element's distance from `e` are worked out
+once at load — and `game.ts` runs the waves on top. Nothing there touches three.js.
+
+`engine.ts` is the only module that does, and the island loads it with a dynamic
+`import()` once it is in a browser. That keeps three.js (most of a 600 KB chunk)
+out of the server render and out of the page's first download: the HUD hydrates
+immediately and the arena follows.
+
+One thing about handing a box to code the island does not render: give the box a
+fixed child. `@remix-run/ui`'s reconciler empties an element whose rendered
+children are none (`textContent = ""`) whenever the island redraws —
+`data-rmx-preserve-dom` does not stop it — so a canvas appended into an empty box
+vanishes on the first HUD update. `gun-arena.tsx` renders one `<span hidden />`
+into the box, and the canvas the engine appends after it is left alone.
 
 ## Styling
 
