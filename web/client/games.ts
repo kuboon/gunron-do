@@ -2,7 +2,7 @@
  * The games, as the site knows them.
  *
  * One entry per game: what it is called, what it is, and where the two pages that make it up are.
- * The home page lists this, the shell links it, and `server/games/` answers a rules request by
+ * The home page lists this, the shell links it, and `server/rules.ts` answers a rules request by
  * looking its slug up here — so adding a game is an entry here, a page, and a Markdown file, and
  * nothing has to be remembered in a fourth place.
  *
@@ -14,7 +14,7 @@ import { routes } from "./routes.ts";
 
 /** One game: the screen you play, and the page that explains it. */
 export interface Game {
-  /** The URL segment, and the name of its Markdown file in `server/games/`. */
+  /** The URL segment, and the name of its directories: `client/{slug}/` and `server/{slug}/`. */
   slug: string;
   title: string;
   /** One line, on the home page and under the title. */

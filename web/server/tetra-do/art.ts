@@ -1,12 +1,12 @@
 /**
- * The pictures on the cards.
+ * テトラ道's picture on its cards.
  *
- * A page says which one it wants by name — `export const art = "tetra-do"` — and the drawing
- * itself lives here, in `server/`, where Skia is. That split is the point: a page module is
- * rendered into HTML and must not reach for a WebAssembly text shaper, so what crosses the line
- * is a string.
+ * A page says which picture it wants by name — `export const art = "tetra-do"` — and `og/mod.ts`
+ * looks the name up. The drawing itself lives here, in `server/`, where Skia is. That split is the
+ * point: a page module is rendered into HTML and must not reach for a WebAssembly text shaper, so
+ * what crosses the line is a string.
  *
- * The one picture so far is テトラ道's, and it is the game rather than a decoration of it: the
+ * The picture is the game rather than a decoration of it: the
  * solid at its home orientation, the `e` facing out and ringed to say so, and under it the three
  * cells that put it there. `a b c` is the shortest trace that comes home — checked against
  * `compose`, not assumed — so the card gives the answer away, which is the right thing for a card
@@ -25,24 +25,24 @@ import {
   ink,
   OP_COLORS,
   surface,
-} from "../../client/games/tetra-do/palette.ts";
-import { MARK_POSITIONS } from "../../client/islands/_lib/cell.tsx";
+} from "../../client/tetra-do/palette.ts";
+import { MARK_POSITIONS } from "../../client/tetra-do/cell.tsx";
 import {
   IDENTITY,
   type Op,
   opBase,
   opDirection,
   opLabel,
-} from "../../client/games/tetra-do/rotation.ts";
+} from "../../client/tetra-do/rotation.ts";
 import {
   buildScene,
   type Face,
   type Marker,
-} from "../../client/games/tetra-do/solid.ts";
-import type { Art, Box, Pen } from "./card.ts";
+} from "../../client/tetra-do/solid.ts";
+import type { Art, Box, Pen } from "../og/card.ts";
 
-/** Where a page's `art` name goes. One entry per picture; an unknown name is a mistake. */
-export const ART: Readonly<Record<string, Art>> = { "tetra-do": tetraDo() };
+/** The picture, drawn once — `og/mod.ts` files it under `"tetra-do"`. */
+export const art: Art = tetraDo();
 
 /** The trace the card shows: the three letters that come home, in order. */
 const TRACE: readonly Op[] = [0, 1, 2];

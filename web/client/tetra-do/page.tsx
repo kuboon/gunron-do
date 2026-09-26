@@ -3,8 +3,8 @@
  *
  * The page is a layout and six islands: the solid, the clock, the board, the panel that covers
  * the board between rounds, the buttons, and the label saying which board this is. Nothing
- * of the game is decided here; `games/tetra-do/` holds the rules and the islands read them, which
- * is what lets this file be the one place that says where each part goes.
+ * of the game is decided here; the modules beside this file hold the rules and the islands read
+ * them, which is what lets this file be the one place that says where each part goes.
  *
  * Why four islands rather than one. A turn of the solid runs at sixty frames a second and a board
  * re-render is twenty-five cells, so the two are split along the line that matters — what changes
@@ -20,16 +20,16 @@
 
 import { css, type RemixNode } from "@remix-run/ui";
 
-import { TetraBoard } from "../islands/tetra-board.tsx";
-import { TetraControls } from "../islands/tetra-controls.tsx";
-import { TetraHud } from "../islands/tetra-hud.tsx";
-import { TetraSeed } from "../islands/tetra-seed.tsx";
-import { TetraPanel } from "../islands/tetra-panel.tsx";
-import { TetraSolid } from "../islands/tetra-solid.tsx";
+import { TetraBoard } from "./islands/tetra-board.tsx";
+import { TetraControls } from "./islands/tetra-controls.tsx";
+import { TetraHud } from "./islands/tetra-hud.tsx";
+import { TetraSeed } from "./islands/tetra-seed.tsx";
+import { TetraPanel } from "./islands/tetra-panel.tsx";
+import { TetraSolid } from "./islands/tetra-solid.tsx";
 import { findGame } from "../games.ts";
 import { GAMECENTER_AUTHOR, type GameCenterManifest } from "../gamecenter.ts";
-import { ACHIEVEMENTS, GAMECENTER_ID } from "../games/tetra-do/achievements.ts";
-import { ink, surface } from "../games/tetra-do/palette.ts";
+import { ACHIEVEMENTS, GAMECENTER_ID } from "./achievements.ts";
+import { ink, surface } from "./palette.ts";
 import { routes } from "../routes.ts";
 
 const game = findGame("tetra-do")!;

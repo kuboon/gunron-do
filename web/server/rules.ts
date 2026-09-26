@@ -1,17 +1,18 @@
 /**
  * The games' rules: the Markdown, and what turns it into a page.
  *
- * One file per game, named after its slug, sitting right here — so the files this reads are its
- * own siblings and `import.meta.dirname` is the only path involved. `client/games.ts` is what says
- * which slugs exist; a request for anything else is not a game, and is answered as such by the
- * router rather than by trying to open a file whose name came from a URL.
+ * One file per game, `rules.md` in the game's own directory beside this file — `tetra-do/rules.md`
+ * — so everything a game is on the server side sits in one place, and `import.meta.dirname` is the
+ * only path involved. `client/games.ts` is what says which slugs exist; a request for anything else
+ * is not a game, and is answered as such by the router rather than by trying to open a file whose
+ * name came from a URL.
  *
  * Everything Markdown is here: the front-matter shape, the parser, the file read, and the
  * Markdown-to-nodes step. `@kuboon/md` and `@std/front-matter` are imported from nowhere else,
  * which is what keeps Markdown out of the generator — it serves what this site's own code returns.
  *
  * The rules are a route like any other page rather than a file served off disk, which is also why
- * a `.md` file is safe to keep beside the source: nothing serves this directory.
+ * a `.md` file is safe to keep beside the source: nothing serves `server/`.
  */
 
 import { markdownToHast, tocFromHast } from "@kuboon/md";
@@ -19,13 +20,13 @@ import { hastToRemix } from "@kuboon/md/hast_to_remix.ts";
 import type { RemixNode } from "@remix-run/ui";
 import { extract } from "@std/front-matter/yaml";
 
-import { type Game, games } from "../../client/games.ts";
-import type { TocEntry } from "../../client/pages/rules.tsx";
-import { routes } from "../../client/routes.ts";
-import { ogImage } from "../og/mod.ts";
+import { type Game, games } from "../client/games.ts";
+import type { TocEntry } from "../client/pages/rules.tsx";
+import { routes } from "../client/routes.ts";
+import { ogImage } from "./og/mod.ts";
 
-/** Where the Markdown is: right here, next to this file. */
-const rulesDir = import.meta.dirname!;
+/** Where the games' directories are: right here, next to this file. */
+const serverDir = import.meta.dirname!;
 
 /** A game's rules, read off disk. */
 export interface Rules {
@@ -62,7 +63,7 @@ export interface Rules {
  * @returns Its rules, or `null` when the file is missing
  */
 export async function readRules(game: Game): Promise<Rules | null> {
-  const text = await Deno.readTextFile(`${rulesDir}/${game.slug}.md`)
+  const text = await Deno.readTextFile(`${serverDir}/${game.slug}/rules.md`)
     .catch(() => null);
   if (text === null) return null;
 

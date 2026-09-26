@@ -30,17 +30,11 @@
 import { clientEntry, css, type Handle, on, ref } from "@remix-run/ui";
 import { animateEntrance, animateLayout } from "@remix-run/ui/animation";
 
-import { cellGlyph } from "./_lib/cell.tsx";
-import { refuseDoubleTap, refuseZoomGestures } from "./_lib/gestures.ts";
-import {
-  type Burst,
-  type BurstCell,
-  game,
-  HEIGHT,
-  WIDTH,
-} from "../games/tetra-do/game.ts";
-import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
-import { freeReduction, opBase } from "../games/tetra-do/rotation.ts";
+import { cellGlyph } from "../cell.tsx";
+import { refuseDoubleTap, refuseZoomGestures } from "../../gestures.ts";
+import { type Burst, type BurstCell, game, HEIGHT, WIDTH } from "../game.ts";
+import { ink, OP_COLORS, surface } from "../palette.ts";
+import { freeReduction, opBase } from "../rotation.ts";
 
 /**
  * The board's own measurements, in pixels.

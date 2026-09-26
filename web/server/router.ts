@@ -31,9 +31,9 @@ import { createFileTree, githubPages } from "@remix-kbn/ssg/site";
 import type { FileServerBehavior } from "@remix-kbn/ssg/site";
 
 import { assets, assetsPath } from "./assets.ts";
-import { readRules, rulesImage } from "./games/mod.ts";
+import { readRules, rulesImage } from "./rules.ts";
 import { ogImage, ogPaths, serveOgImage } from "./og/mod.ts";
-import { shareTemplate } from "./og/share.ts";
+import { shareTemplate } from "./tetra-do/share.ts";
 import { base } from "../client/base.ts";
 import { findGame } from "../client/games.ts";
 import type { GameCenterManifest } from "../client/gamecenter.ts";
@@ -41,7 +41,7 @@ import { Layout } from "../client/layout.tsx";
 import { routes } from "../client/routes.ts";
 
 import * as Home from "../client/pages/index.tsx";
-import * as TetraDo from "../client/pages/tetra-do.tsx";
+import * as TetraDo from "../client/tetra-do/page.tsx";
 import RulesPage from "../client/pages/rules.tsx";
 
 /** Deploy path prefix. The build strips it back off when writing, so output lands at the root. */
@@ -63,7 +63,7 @@ interface Page {
   chrome?: "site" | "bare";
   /** What a `bare` page paints the document, so an overscroll shows its colour and not the site's. */
   background?: string;
-  /** Set by a page whose social card carries a picture — the name of one in `og/art.ts`. */
+  /** Set by a page whose social card carries a picture — a key of `ART` in `og/mod.ts`. */
   art?: string;
   /** Set by a page whose card wants a shorter title than its `<title>`. */
   ogTitle?: string;

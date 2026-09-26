@@ -19,16 +19,10 @@
 
 import { clientEntry, css, type Handle } from "@remix-run/ui";
 
-import {
-  game,
-  LOW_TIME_MS,
-  type Pop,
-  ROUND_MS,
-  URGENT_MS,
-} from "../games/tetra-do/game.ts";
-import { refuseDoubleTap } from "./_lib/gestures.ts";
+import { game, LOW_TIME_MS, type Pop, ROUND_MS, URGENT_MS } from "../game.ts";
+import { refuseDoubleTap } from "../../gestures.ts";
 
-import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
+import { ink, OP_COLORS, surface } from "../palette.ts";
 
 /** How long a pop lives. Long enough to read, short enough to be gone by the next trace. */
 const POP_MS = 900;

@@ -10,16 +10,16 @@
  * about all four at once. The `e` on the home face is the other half of that answer: a player
  * learns to look for it rather than reading the score line to find out whether the trace closed.
  *
- * Nothing here computes geometry; `games/tetra-do/solid.ts` does, and this places what it returns.
+ * Nothing here computes geometry; `tetra-do/solid.ts` does, and this places what it returns.
  */
 
 import { clientEntry, css, type Handle } from "@remix-run/ui";
 
-import { refuseDoubleTap } from "./_lib/gestures.ts";
+import { refuseDoubleTap } from "../../gestures.ts";
 
-import { game, URGENT_MS } from "../games/tetra-do/game.ts";
-import { ink, surface } from "../games/tetra-do/palette.ts";
-import { buildScene, VIEW_BOX } from "../games/tetra-do/solid.ts";
+import { game, URGENT_MS } from "../game.ts";
+import { ink, surface } from "../palette.ts";
+import { buildScene, VIEW_BOX } from "../solid.ts";
 
 /** The lit colour of the `e` the moment a turn lands home. */
 const GLOW_COLOR = "#ffe27a";

@@ -10,7 +10,7 @@
  * but the achievements that are about them.
  */
 
-import type { Achievement } from "../../gamecenter.ts";
+import type { Achievement } from "../gamecenter.ts";
 
 /** The game's slug on the hub — the same as the site's. */
 export const GAMECENTER_ID = "tetra-do";

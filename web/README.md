@@ -30,8 +30,9 @@ card, drawn by `server/og/`.
 
 ## How it works
 
-`client/routes.ts` states every URL the site answers, `client/pages/` renders
-them, and `server/router.ts` maps one to the other — the shape a Remix app has:
+`client/routes.ts` states every URL the site answers, the pages render them —
+`client/pages/`, and each game's `client/{slug}/page.tsx` — and
+`server/router.ts` maps one to the other, the shape a Remix app has:
 
 ```ts
 router.get(routes.tetraDo, tetraDoAction);
@@ -64,10 +65,9 @@ fetch behind a frame navigation. It asks the asset server for `getHref` and
 `getPreloads`, which is all it wants from one, so `@kuboon/remix-assets-deno`
 goes straight in.
 
-A game's rules are a page like any other. `server/games/mod.ts` sits in the
-directory the `.md` files are in, reads the one named after a game and hands
-back its front-matter and its rendered body, so `server/router.ts` answers the
-route in a few lines:
+A game's rules are a page like any other. `server/rules.ts` reads
+`server/{slug}/rules.md` for a game and hands back its front-matter and its
+rendered body, so `server/router.ts` answers the route in a few lines:
 
 ```ts
 router.get(routes.rules, async (context) => {
@@ -132,21 +132,26 @@ web/
     theme.ts         # the css() mixins more than one module uses
     layout.tsx       # the HTML document shell
     hydration.ts     # run() — the client runtime, loaded by a page that hydrates
+    gamecenter.ts    # the GameCenter manifest's shape, and the author's id
+    gestures.ts      # refusing the phone gestures a game has no use for
     pages/
       index.tsx      # home — the list of games
-      tetra-do.tsx   # テトラ道, full screen: four islands and where they go
       rules.tsx      # any game's rules, around a rendered Markdown body
-    games/
-      tetra-do/
-        rotation.ts  # the group: six moves, and the arithmetic that composes them
-        game.ts      # the board, the trace, the clock — and the one instance
-        solid.ts     # where every corner of the tetrahedron lands on screen
-        palette.ts   # the game's own colours, painted by CSS and by SVG alike
-    islands/
-      tetra-board.tsx     # the board, and the finger on it
-      tetra-hud.tsx       # score, longest trace, and the clock
-      tetra-solid.tsx     # the tetrahedron, sixty frames a second
-      tetra-controls.tsx  # the buttons, and the cards that book-end a round
+    tetra-do/        # everything テトラ道 is in the browser
+      page.tsx       # the screen: six islands and where they go
+      rotation.ts    # the group: six moves, and the arithmetic that composes them
+      game.ts        # the board, the trace, the clock — and the one instance
+      solid.ts       # where every corner of the tetrahedron lands on screen
+      palette.ts     # the game's own colours, painted by CSS and by SVG alike
+      cell.tsx       # one cell's picture, shared by the board and the card
+      …              # the recording, the walkthrough, sound, sharing, unlocks
+      islands/
+        tetra-board.tsx     # the board, and the finger on it
+        tetra-hud.tsx       # score, longest trace, and the clock
+        tetra-solid.tsx     # the tetrahedron, sixty frames a second
+        tetra-controls.tsx  # the buttons under the board
+        tetra-panel.tsx     # the cards that book-end a round
+        tetra-seed.tsx      # which day's board this is
     static/
       app.css        # tokens, document defaults, the cascade layer order
       favicon.svg
@@ -154,9 +159,11 @@ web/
     deno.json        # lib: deno.ns — plus the tasks and their permission sets
     router.ts        # the wiring — routes to pages, plus the rest of the site
     assets.ts        # client/ compiled as one graph
-    games/
-      mod.ts         # the rules: the Markdown, and what turns it into a page
-      *.md           # one file per game, named after its slug
+    rules.ts         # the rules: the Markdown, and what turns it into a page
+    tetra-do/        # everything テトラ道 is on the server
+      rules.md       # its rules
+      art.ts         # the picture on its social card
+      share.ts       # the og.kbn.one template a shared round's card is drawn from
     og/
       mod.ts         # which page gets which social card, and the route serving them
       card.ts        # the drawing — Skia, via canvaskit-wasm
@@ -168,12 +175,17 @@ Two files sit across the line on purpose. `client/base.ts` reads `BASE_URL` off
 `globalThis` rather than through `Deno.env`, because a prefix is a render-time
 value that the browser is never told and `client/` may not name `Deno`; and the
 rules screen is `client/pages/rules.tsx` while the module that reads the `.md`
-files is `server/games/mod.ts`. The screen states the shape it needs — a game,
+files is `server/rules.ts`. The screen states the shape it needs — a game,
 and a body already rendered — and the server's own `Rules` is a superset of it.
 
 ## テトラ道
 
-The game is four plain modules under `client/games/tetra-do/`: `rotation.ts` is
+Each game keeps a directory of its own on both sides of the line, named after
+its slug: `client/tetra-do/` for everything the browser is given, and
+`server/tetra-do/` for its rules and its cards. What is left at the top of
+`client/` and `server/` is the site — shared by every game, owned by none.
+
+The game is four plain modules under `client/tetra-do/`: `rotation.ts` is
 the group — six moves, the quaternions they are, and the free reduction that
 decides what a trace is worth — `solid.ts` turns an orientation into the numbers
 an SVG needs, `palette.ts` holds the colours, and `game.ts` is the board, the
@@ -199,7 +211,7 @@ the top is a new one — `animateLayout` slides the first, `animateEntrance` dro
 the second, and `animateExit` keeps a cleared cell on screen long enough to see
 it go. Nothing in the island animates anything by hand.
 
-`client/pages/tetra-do.tsx` places the four and sets `chrome: "bare"`, which
+`client/tetra-do/page.tsx` places the islands and sets `chrome: "bare"`, which
 drops the site's header and footer: on a phone the board should be as wide as
 the phone. It is also the one page that overrides the shell's viewport meta,
 because `env(safe-area-inset-*)` reads `0px` until a page asks for
@@ -268,7 +280,7 @@ out ahead of Remix's own rules — Remix appends its collected styles just befor
   also has behaviour, the `on(...)` handlers go last.
 - **A page that wants the screen says so to the shell.** A game exports
   `chrome = "bare"`, and `client/layout.tsx` leaves out the header, the footer
-  and the main column's measure — `client/pages/tetra-do.tsx` then lays itself
+  and the main column's measure — `client/tetra-do/page.tsx` then lays itself
   out from the viewport, and paints the document through `background` so an
   overscroll on a phone shows the board's colour rather than the site's.
 - **Nesting reaches markup this site does not write.** `theme.ts`'s `proseStyle`
@@ -287,7 +299,7 @@ looked up in a table. Five edits:
 1. Add it to `client/games.ts` — its slug, title, tagline and description. The
    home page lists that, the shell links it, and the rules route reads it.
 2. Name its URL in `client/routes.ts` — `shinGame: get("/shin-game")`.
-3. Write `client/pages/shin-game.tsx`, exporting a component as `default` plus a
+3. Write `client/shin-game/page.tsx`, exporting a component as `default` plus a
    `title`, and `hydrate = true` if it places an island. A game that wants the
    screen exports `chrome = "bare"`, the `background` to paint the document, and
    a `viewport` of its own.
@@ -295,13 +307,15 @@ looked up in a table. Five edits:
    `router.get(routes.shinGame, pageAction(routes.shinGame, ShinGame))`. The
    route goes in twice because the second one is what files the page's social
    card.
-5. Drop `server/games/shin-game.md` beside the others. Its rules are served at
+5. Write its rules as `server/shin-game/rules.md`. They are served at
    `/shin-game/rules` with no further wiring: that route is `:game`, and the
    slug in step 1 is what makes it a game.
 
-Its logic belongs in `client/games/shin-game/`, and its islands in
-`client/islands/` — `server/assets.ts` globs `islands/*.tsx`, so the file being
-there is what makes it an entrypoint.
+Its logic belongs beside its page in `client/shin-game/`, and its islands in
+`client/shin-game/islands/` — `server/assets.ts` globs `*/islands/*.tsx`, so the
+file being there is what makes it an entrypoint. Anything server-side that is
+only about this game — its card's picture, a template — goes in
+`server/shin-game/`.
 
 The crawl starts at `entryPoints` in `server/router.ts` and follows links, so
 **what is reachable is what gets generated**. A page nothing links to belongs in
@@ -373,7 +387,7 @@ time, and a static site has no server to draw a picture per link. So a shared
 round's card is drawn by [og.kbn.one](https://og.kbn.one/), a service that fills
 in a template the site publishes.
 
-`server/og/share.ts` is that template — `vars`, the fonts to fetch, the OG text,
+`server/tetra-do/share.ts` is that template — `vars`, the fonts to fetch, the OG text,
 and two SVGs with `{{date}}`, `{{cleared}}`, `{{solved}}` and `{{combo}}` holes
 in them. It is generated rather than hand-written for the same reason the cards
 are: the colours, the score names and the game's address are all things this
@@ -393,7 +407,7 @@ for — so the wide card has to survive the crop. Its sides are background, and
 the bar's colours change at thirds of that square, so the crop sees three equal
 parts.
 
-The browser half is `client/games/tetra-do/share.ts`. It builds the URL the
+The browser half is `client/tetra-do/share.ts`. It builds the URL the
 share buttons hand out —
 
 ```
@@ -416,12 +430,12 @@ are carried on to the image URL, so a recording — which the picture never show
 reads a game's manifest out of its published page, so the page carries it — a
 `<script type="application/gamecenter+json">` in the `<head>`, which `Layout`
 writes for any page that exports a `gamecenter` manifest. `client/gamecenter.ts`
-has its shape and the author's id; `client/pages/tetra-do.tsx` fills it in.
+has its shape and the author's id; `client/tetra-do/page.tsx` fills it in.
 
-The achievements themselves are `client/games/tetra-do/achievements.ts`: one
+The achievements themselves are `client/tetra-do/achievements.ts`: one
 list, read by the manifest and by the game, so a key the hub knows is always one
 the game can unlock, and each threshold sits next to the words describing it.
-`client/games/tetra-do/unlocks.ts` watches the game against that list and hands
+`client/tetra-do/unlocks.ts` watches the game against that list and hands
 keys to the SDK (`jsr:@kuboon/game-center-sdk`). Only real rounds count — not the
 walkthrough, not a replay — except for the achievements that are about those.
 
@@ -439,8 +453,8 @@ approves the URL at https://ga-cen.kbn.one/dev; after that, a push is enough.
 
 ## Markdown content
 
-Each game's rules are a `.md` file under `server/games/`, named after the
-game's slug, with `title` and `summary` front-matter:
+Each game's rules are `rules.md` in the game's directory under `server/` —
+`server/tetra-do/rules.md` — with `title` and `summary` front-matter:
 
 ```markdown
 ---
@@ -451,7 +465,7 @@ summary: 正四面体を120°ずつ回す操作の盤面をなぞり、元の向
 Body starts here…
 ```
 
-`server/games/mod.ts` turns it into a page: front-matter via
+`server/rules.ts` turns it into a page: front-matter via
 `@std/front-matter`, the body via [`@kuboon/md`](https://jsr.io/@kuboon/md) —
 GitHub-flavored, sanitized, with heading anchors and Shiki-highlighted code. It
 is the only module importing either package, and the only one that reads the
@@ -488,21 +502,21 @@ Japanese is a line per sentence, and each is right for what it renders to.
 
 Most of the site is static HTML. When you need interactivity, use an **island**:
 a component that is server-rendered like everything else, then hydrated in the
-browser. See `client/islands/tetra-hud.tsx`, which is the smallest of the four.
+browser. See `client/tetra-do/islands/tetra-seed.tsx`, which is the smallest.
 
 To add one:
 
-1. Write it in `client/islands/` with `clientEntry(import.meta.url, …)` from
+1. Write it in the game's `islands/` directory with `clientEntry(import.meta.url, …)` from
    `@remix-run/ui` — the module naming itself, so there is no path to keep in
    step with a file name. Pass a **named** function: the name is the export the
    browser imports. Call `handle.update()` after changing state.
 2. Import it into a page and place it, and set `export const hydrate = true` on
    that page.
 
-There is no third step: `server/assets.ts` globs `islands/*.tsx`, so the file
-being there is what makes it an entrypoint. A helper a few islands share goes in
-a subdirectory — `client/games/tetra-do/`, for the four the game's islands share
-— which the glob does not reach.
+There is no third step: `server/assets.ts` globs `*/islands/*.tsx`, so the file
+being there is what makes it an entrypoint. A helper a few islands share goes
+beside `islands/` rather than in it — `client/tetra-do/game.ts`, for the ones
+テトラ道's islands share — which the glob does not reach.
 
 A page that does not set `hydrate` ships no `<script>` at all — the home page
 and the rules pages have none.
@@ -514,15 +528,15 @@ Every island is a browser entrypoint, and all of them go into a _single_
 imports comes out **once**, in a chunk they share:
 
 ```
-client/hydration.js      ─┬─→ chunk-…   the Remix UI runtime
-islands/tetra-board.js   ─┤
-islands/tetra-solid.js   ─┤
-islands/tetra-hud.js     ─┤
-islands/tetra-controls.js ┴─→ chunk-…   games/tetra-do/game.ts
+client/hydration.js                ─┬─→ chunk-…   the Remix UI runtime
+tetra-do/islands/tetra-board.js    ─┤
+tetra-do/islands/tetra-solid.js    ─┤
+tetra-do/islands/tetra-hud.js      ─┤
+tetra-do/islands/tetra-controls.js ┴─→ chunk-…   tetra-do/game.ts
 ```
 
 テトラ道 is why that matters. Its four islands never reference each other; all
-four import `client/games/tetra-do/game.ts`, and the board, the clock and the
+four import `client/tetra-do/game.ts`, and the board, the clock and the
 solid agree about the game only because that module was emitted once. Compile
 the entries independently — one bundler call each — and each would get a board
 of its own.

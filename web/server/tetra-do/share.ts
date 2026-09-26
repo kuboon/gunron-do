@@ -33,13 +33,9 @@
  * work that weight usually would.
  */
 
-import {
-  ink,
-  OP_COLORS,
-  surface,
-} from "../../client/games/tetra-do/palette.ts";
+import { ink, OP_COLORS, surface } from "../../client/tetra-do/palette.ts";
 import { routes } from "../../client/routes.ts";
-import { SITE_NAME, siteUrl } from "./mod.ts";
+import { SITE_NAME, siteUrl } from "../og/mod.ts";
 
 /**
  * The three numbers, in the order the result panel puts them.

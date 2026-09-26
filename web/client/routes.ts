@@ -26,13 +26,13 @@ export const routes = route(base, {
   /** テトラ道, full screen. One line per game, as each one arrives. */
   tetraDo: get("/tetra-do"),
   /**
-   * The template og.kbn.one fills in for a shared round — see `server/og/share.ts`.
+   * The template og.kbn.one fills in for a shared round — see `server/tetra-do/share.ts`.
    *
    * A route rather than a file under `client/static/`, because what it says is built from the
    * game's own colours, score names and address. It sits beside the game it is about, and the
    * share URL names it from here, so a rename is one edit like every other path.
    */
   tetraDoOg: get("/tetra-do/og.json"),
-  /** Any game's rules, from the Markdown file named after it in `server/games/`. */
+  /** Any game's rules, from `rules.md` in its directory under `server/`. */
   rules: get("/:game/rules"),
 });

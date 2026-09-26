@@ -15,11 +15,11 @@
 
 import { clientEntry, css, type Handle, on } from "@remix-run/ui";
 
-import { game } from "../games/tetra-do/game.ts";
-import { ink, OP_COLORS, surface } from "../games/tetra-do/palette.ts";
-import { playUrl, todayInTokyo } from "../games/tetra-do/session.ts";
-import { sound } from "../games/tetra-do/sound.ts";
-import { tutorial } from "../games/tetra-do/tutorial.ts";
+import { game } from "../game.ts";
+import { ink, OP_COLORS, surface } from "../palette.ts";
+import { playUrl, todayInTokyo } from "../session.ts";
+import { sound } from "../sound.ts";
+import { tutorial } from "../tutorial.ts";
 
 export const TetraControls = clientEntry(
   import.meta.url,
