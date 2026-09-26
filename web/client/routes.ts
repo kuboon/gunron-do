@@ -33,6 +33,8 @@ export const routes = route(base, {
    * share URL names it from here, so a rename is one edit like every other path.
    */
   tetraDoOg: get("/tetra-do/og.json"),
+  /** 群シューター, full screen. */
+  gunShooter: get("/gun-shooter"),
   /** Any game's rules, from `rules.md` in its directory under `server/`. */
   rules: get("/:game/rules"),
 });

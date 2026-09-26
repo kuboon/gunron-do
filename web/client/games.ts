@@ -38,6 +38,16 @@ export const games: readonly Game[] = [
     href: routes.tetraDo.href(),
     rulesHref: routes.rules.href({ game: "tetra-do" }),
   },
+  {
+    slug: "gun-shooter",
+    title: "群シューター",
+    tagline: "当てた場所が回転の軸。逆元で e に戻して e砲。",
+    description:
+      "D₃・D₄・A₄・S₄・A₅ の立体が砲台に迫ってくるシューティング。面・頂点・辺のどこに当てるかで" +
+      "回転の軸が決まる。同じ軸で逆に回す、つまり逆元を撃って敵を単位元 e に戻し、e砲でとどめ。",
+    href: routes.gunShooter.href(),
+    rulesHref: routes.rules.href({ game: "gun-shooter" }),
+  },
 ];
 
 /**
