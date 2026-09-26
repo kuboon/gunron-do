@@ -1,240 +1,309 @@
 /**
- * An enemy as it is drawn: its solid, turned to whatever element it is in, and facing the player.
+ * An enemy as it is drawn: its solid, turned to whatever element it is in, facing the turret.
  *
  * Two transforms, one inside the other, and the split is the game's whole geometry. The outer one
- * — the frame — stands where the enemy is and looks at the player, so its `+Z` is the axis a twist
- * turns about and its `+Y` is "up" as the player sees it. The inner one — the body — is the
- * element: the rotation from the home pose, exactly the quaternion the rules hold. So the `e` face
- * is at the front and upright precisely when the body's rotation is the identity, which is the
- * picture the player is learning to read.
+ * — the frame — stands where the enemy is and looks at the turret across the floor, so its `+Z`
+ * points at the turret and its `+Y` is up. The inner one — the body — is the element: the rotation
+ * from the home pose, exactly the quaternion the rules hold. So the `e` face looks at the turret,
+ * upright, precisely when the body's rotation is the identity.
  *
- * A turn is drawn by sliding the body from one element to the next along the shortest way round,
- * which for these rotations is the turn itself — about the shot's axis, by the shot's angle — with
- * a little overshoot so it lands with a thump.
+ * Everything the player reads is drawn plainly, lit like an object rather than glowing: faces in
+ * muted colours with dark edges, the `e` face white with the letter in ink. On top of that, in the
+ * frame (so it never moves with the body): a dashed outline where the `e` face belongs. And, when
+ * asked for, the spot the pointer is on with the axis through it, the spot the hint says to hit, or
+ * the axis the enemy is turned about.
  */
 
 import * as THREE from "three";
 
 import type { Enemy } from "./game.ts";
-import { guide, type Species, type SpeciesId } from "./groups.ts";
-import { FACE_COLORS, GOLD, SHOT_COLORS, SPECIES_COLORS } from "./palette.ts";
-import type { Quat } from "./quat.ts";
+import { type Answer, type Species, type SpeciesId } from "./groups.ts";
+import {
+  DANGER,
+  E_FACE,
+  E_INK,
+  FACE_COLORS,
+  GOLD,
+  SHOT_COLORS,
+  SHOT_GLYPHS,
+  SPECIES_COLORS,
+} from "./palette.ts";
+import type { Quat, Vec3 } from "./quat.ts";
 import { faceCentre, faceNormal } from "./solids.ts";
 
 /** The parts of a species' mesh that every enemy of that kind shares. */
 interface Kit {
-  /** From the middle, out through the `e` face to {@link REACH}: the needle that says where it points. */
-  needle: THREE.Vector3;
   faces: THREE.BufferGeometry;
   eFace: THREE.BufferGeometry;
   edges: THREE.BufferGeometry;
+  /** Where the `e` face belongs: a dashed outline just outside it. */
+  socket: THREE.BufferGeometry;
   colors: string[];
 }
 
-/**
- * How far out, in circumradii, the gold needle's tip and the green ring sit.
- *
- * Both at the same distance from the middle, so "the tip is in the ring" is something the eye can
- * see: outside the solid, where neither is hidden behind it.
- */
-const REACH = 1.5;
-
 const kits = new Map<SpeciesId, Kit>();
 let eTexture: THREE.Texture | null = null;
+const labels = new Map<string, THREE.Texture>();
 
 /** The colours of a species' faces, the `e` face first — for the shards when it breaks. */
 export function faceColors(species: Species): string[] {
   return kit(species).colors;
 }
 
+/**
+ * What a pointer on an enemy's surface is on: the spot a round would land at.
+ *
+ * The nearest spot to the point hit, with the small features given room: a corner, or an edge's
+ * middle, would otherwise be a sliver no finger could hit. That is measured over every spot, not
+ * only the ones on the face that was hit, so a point near the rim of a plate's face snaps to the
+ * rim — a plate's rim is too thin to hit on purpose.
+ *
+ * @param enemy What was hit
+ * @param local Where, in the body's own coordinates
+ */
+export function spotAt(enemy: Enemy, local: THREE.Vector3): number {
+  const weight = { face: 1, edge: 0.7, vertex: 0.6 } as const;
+  let best = 0;
+  let bestD = Infinity;
+  enemy.species.spots.forEach((spot, i) => {
+    const [x, y, z] = spot.point;
+    const d = Math.hypot(local.x - x, local.y - y, local.z - z) *
+      weight[spot.kind];
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
 export class EnemyView {
   readonly enemy: Enemy;
   readonly frame = new THREE.Group();
   readonly body = new THREE.Group();
+  /** The meshes a pointer can hit. */
+  readonly pickables: THREE.Mesh[];
   readonly #faceMat: THREE.MeshStandardMaterial;
-  readonly #eMat: THREE.MeshBasicMaterial;
+  readonly #eMat: THREE.MeshStandardMaterial;
   readonly #edgeMat: THREE.LineBasicMaterial;
-  readonly #shellMat: THREE.MeshBasicMaterial;
-  readonly #halo: THREE.Sprite;
-  readonly #lock: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
-  readonly #axis: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>;
-  readonly #ghostMat: THREE.MeshBasicMaterial;
-  readonly #needleMat: THREE.MeshBasicMaterial;
-  readonly #socket: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
-  readonly #orbit: THREE.LineLoop<
-    THREE.BufferGeometry,
-    THREE.LineDashedMaterial
+  readonly #socketMat: THREE.MeshBasicMaterial;
+  readonly #socket: THREE.Mesh;
+  readonly #shadow: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
+  readonly #ground: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+
+  // The pointer's spot: a ring on it, and the axis through it.
+  readonly #aimRing: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  readonly #aimAxis: THREE.Mesh<
+    THREE.CylinderGeometry,
+    THREE.MeshBasicMaterial
   >;
-  #frameFace: number | null = null;
-  #frameShown = 0;
-  #frameHot = 0;
+  // The hint: a ring on the spot to hit, and a label saying which way.
+  readonly #hintRing: THREE.Mesh<
+    THREE.RingGeometry,
+    THREE.MeshBasicMaterial
+  >;
+  readonly #hintLabel: THREE.Sprite;
+  // The weaker hint: the axis the enemy is turned about.
+  readonly #ownAxis: THREE.Mesh<
+    THREE.CylinderGeometry,
+    THREE.MeshBasicMaterial
+  >;
+  // The turn in progress: its axis, lit in the round's colour.
+  readonly #turnAxis: THREE.Mesh<
+    THREE.CylinderGeometry,
+    THREE.MeshBasicMaterial
+  >;
+
+  #aim: { spot: number; reachable: boolean } | null = null;
+  #hint: Answer | null = null;
+  #hintKey = "";
+  #axis: Vec3 | null = null;
 
   #from = new THREE.Quaternion();
   #to = new THREE.Quaternion();
   #spin = 1;
-  #spinAxis = new THREE.Vector3();
   #pop = 0;
   #born = 0;
   #home = 0;
   #hit = 0;
 
-  constructor(enemy: Enemy, glow: THREE.Texture) {
+  constructor(enemy: Enemy) {
     this.enemy = enemy;
     const k = kit(enemy.species);
     const color = SPECIES_COLORS[enemy.species.id];
 
     this.#faceMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.35,
-      metalness: 0.15,
+      roughness: 0.62,
+      metalness: 0.05,
       flatShading: true,
-      emissive: new THREE.Color(color),
-      emissiveIntensity: 0.08,
+      emissive: new THREE.Color(0xffffff),
+      emissiveIntensity: 0,
     });
-    this.#eMat = new THREE.MeshBasicMaterial({
+    this.#eMat = new THREE.MeshStandardMaterial({
       map: eGlyph(),
-      transparent: true,
-      toneMapped: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
+      roughness: 0.55,
+      metalness: 0,
+      emissive: new THREE.Color(GOLD),
+      emissiveIntensity: 0,
     });
-    this.#edgeMat = new THREE.LineBasicMaterial({
-      color: new THREE.Color(color).multiplyScalar(2.5),
-      toneMapped: false,
-    });
-    this.#shellMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(color).multiplyScalar(0.9),
-      side: THREE.BackSide,
-      transparent: true,
-      opacity: 0.55,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      toneMapped: false,
-    });
+    this.#edgeMat = new THREE.LineBasicMaterial({ color: 0x120c1c });
 
     const faces = new THREE.Mesh(k.faces, this.#faceMat);
     const eFace = new THREE.Mesh(k.eFace, this.#eMat);
     const edges = new THREE.LineSegments(k.edges, this.#edgeMat);
-    const shell = new THREE.Mesh(k.faces, this.#shellMat);
-    shell.scale.setScalar(1.09);
-    this.body.add(faces, eFace, edges, shell);
+    this.body.add(faces, eFace, edges);
+    this.pickables = [faces, eFace];
 
-    // The x-ray: the `e` glyph and a gold needle out of its face, drawn through the body, so where
-    // the `e` face is can be read from any side. Faint behind, full in front.
-    this.#ghostMat = new THREE.MeshBasicMaterial({
-      map: eGlyph(),
+    this.#socketMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(GOLD),
       transparent: true,
-      opacity: 0.4,
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false,
+      opacity: 0,
       side: THREE.DoubleSide,
-    });
-    const ghost = new THREE.Mesh(k.eFace, this.#ghostMat);
-    ghost.renderOrder = 10;
-    this.#needleMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(GOLD).multiplyScalar(1.6),
-      transparent: true,
-      opacity: 0.85,
-      depthTest: false,
       depthWrite: false,
-      toneMapped: false,
     });
-    const needle = new THREE.Mesh(needleGeometry(k.needle), this.#needleMat);
-    needle.renderOrder = 11;
-    const tip = new THREE.Mesh(
-      new THREE.SphereGeometry(0.13, 12, 8),
-      this.#needleMat,
-    );
-    tip.position.copy(k.needle);
-    tip.renderOrder = 11;
-    this.body.add(ghost, needle, tip);
+    this.#socket = new THREE.Mesh(k.socket, this.#socketMat);
 
-    // The green ring, and the circle a twist carries the needle's tip round. Both belong to the
-    // frame, not the body: where a face has to be for ⇅ to lift it is fixed relative to the
-    // player, whatever the solid is doing. Twist the gold tip round the circle into the ring, ⇅.
-    const lime = new THREE.Color(SHOT_COLORS.flip);
-    this.#socket = new THREE.Mesh(
-      new THREE.RingGeometry(0.2, 0.3, 32),
+    const unlit = (c: THREE.ColorRepresentation, opacity = 0) =>
       new THREE.MeshBasicMaterial({
-        color: lime.clone().multiplyScalar(2.2),
+        color: new THREE.Color(c),
         transparent: true,
-        opacity: 0,
+        opacity,
         depthTest: false,
         depthWrite: false,
         side: THREE.DoubleSide,
-        toneMapped: false,
-      }),
-    );
-    this.#socket.renderOrder = 12;
-    this.#orbit = new THREE.LineLoop(
-      circle(64),
-      new THREE.LineDashedMaterial({
-        color: lime.clone().multiplyScalar(1.4),
-        dashSize: 0.12,
-        gapSize: 0.08,
-        transparent: true,
-        opacity: 0,
-        depthTest: false,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    );
-    this.#orbit.computeLineDistances();
-    this.#orbit.renderOrder = 8;
+      });
 
-    // The halo and the lock ring belong to the frame, not the body: they face the player whatever
-    // the solid is doing.
-    this.#halo = new THREE.Sprite(
+    this.#aimRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.1, 0.17, 32),
+      unlit(0xffffff),
+    );
+    this.#aimRing.renderOrder = 20;
+    this.#aimAxis = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.018, 0.018, 3, 6, 1, true),
+      unlit(0xffffff),
+    );
+    this.#aimAxis.renderOrder = 19;
+    this.#hintRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.14, 0.24, 32),
+      unlit(0xffffff),
+    );
+    this.#hintRing.renderOrder = 18;
+    this.#hintLabel = new THREE.Sprite(
       new THREE.SpriteMaterial({
-        map: glow,
-        color: new THREE.Color(GOLD),
         transparent: true,
         opacity: 0,
-        blending: THREE.AdditiveBlending,
+        depthTest: false,
         depthWrite: false,
-        toneMapped: false,
       }),
     );
-    this.#halo.scale.setScalar(3.4);
-    this.#lock = new THREE.Mesh(
-      new THREE.RingGeometry(1.42, 1.5, 48, 1),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(GOLD).multiplyScalar(1.4),
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        toneMapped: false,
-      }),
+    this.#hintLabel.renderOrder = 21;
+    this.#hintLabel.scale.setScalar(0.5);
+    this.#ownAxis = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.022, 0.022, 3.2, 6, 1, true),
+      unlit(0xffffff),
     );
-    const axisGeo = new THREE.CylinderGeometry(0.035, 0.035, 3.4, 8, 1, true);
-    this.#axis = new THREE.Mesh(
-      axisGeo,
-      new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        toneMapped: false,
-      }),
+    this.#ownAxis.renderOrder = 17;
+    this.#turnAxis = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03, 0.03, 3.4, 6, 1, true),
+      unlit(0xffffff),
     );
+    this.#turnAxis.renderOrder = 16;
+    this.body.add(this.#aimRing, this.#aimAxis, this.#hintRing);
     this.frame.add(
-      this.#halo,
       this.body,
-      this.#lock,
-      this.#axis,
-      this.#orbit,
       this.#socket,
+      this.#ownAxis,
+      this.#turnAxis,
+      this.#hintLabel,
     );
     this.frame.scale.setScalar(enemy.radius);
+
+    // On the floor: a soft shadow to say where it stands, and a ring that turns gold at `e`.
+    this.#shadow = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 32),
+      new THREE.MeshBasicMaterial({
+        map: shadowTexture(),
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+      }),
+    );
+    this.#shadow.rotation.x = -Math.PI / 2;
+    this.#ground = new THREE.Mesh(
+      new THREE.RingGeometry(0.9, 1, 48),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(color),
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+      }),
+    );
+    this.#ground.rotation.x = -Math.PI / 2;
 
     const q = enemy.species.elements[enemy.state];
     this.body.quaternion.set(q[0], q[1], q[2], q[3]);
     this.#to.copy(this.body.quaternion);
     this.#home = enemy.state === 0 ? 1 : 0;
-    this.#born = 0;
+  }
+
+  /** The things that sit on the floor rather than in the frame. */
+  get floor(): THREE.Object3D[] {
+    return [this.#shadow, this.#ground];
+  }
+
+  /** Where the pointer is on this enemy, or `null` when it is elsewhere. */
+  setAim(aim: { spot: number; reachable: boolean } | null): void {
+    this.#aim = aim;
+    if (aim === null) return;
+    const spot = this.enemy.species.spots[aim.spot];
+    const d = new THREE.Vector3(...spot.dir);
+    const p = new THREE.Vector3(...spot.point);
+    this.#aimRing.position.copy(p).addScaledVector(d, 0.03);
+    this.#aimRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), d);
+    this.#aimAxis.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+    const c = aim.reachable ? 0xffffff : DANGER;
+    this.#aimRing.material.color.set(c);
+    this.#aimAxis.material.color.set(c);
+  }
+
+  /** What the hints show on this enemy: a shot to make, or the axis it is turned about. */
+  setHint(hint: Answer | null, axis: Vec3 | null): void {
+    this.#hint = hint;
+    this.#axis = axis;
+    if (hint !== null) {
+      const spot = this.enemy.species.spots[hint.spot];
+      const d = new THREE.Vector3(...spot.dir);
+      const p = new THREE.Vector3(...spot.point);
+      this.#hintRing.position.copy(p).addScaledVector(d, 0.02);
+      this.#hintRing.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1),
+        d,
+      );
+      this.#hintRing.material.color.set(SHOT_COLORS[hint.spin]);
+      // The label floats above the spot rather than on it, so it never covers the `e`. It lives
+      // in the frame, placed for the pose the enemy has landed in: it only shows once settled.
+      const q = this.enemy.species.elements[this.enemy.state];
+      this.#hintLabel.position.copy(p).addScaledVector(d, 0.25)
+        .applyQuaternion(new THREE.Quaternion(q[0], q[1], q[2], q[3]))
+        .add(new THREE.Vector3(0, 0.55, 0));
+      const key = `${hint.spin}${hint.times}`;
+      if (key !== this.#hintKey) {
+        this.#hintKey = key;
+        this.#hintLabel.material.map = label(
+          SHOT_GLYPHS[hint.spin] + (hint.times > 1 ? `×${hint.times}` : ""),
+          SHOT_COLORS[hint.spin],
+        );
+        this.#hintLabel.material.needsUpdate = true;
+        this.#hintLabel.scale.set(hint.times > 1 ? 0.78 : 0.5, 0.5, 1);
+      }
+    }
+    if (axis !== null) {
+      this.#ownAxis.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(...axis),
+      );
+    }
   }
 
   /**
@@ -247,16 +316,16 @@ export class EnemyView {
   turn(from: Quat, to: Quat, color: string): void {
     this.#from.set(from[0], from[1], from[2], from[3]);
     this.#to.set(to[0], to[1], to[2], to[3]);
-    // The same rotation, the short way round: `to · from⁻¹` is the shot, and its axis is lit.
+    // The turn, seen from outside: `to · from⁻¹`, and its axis is lit.
     const rel = this.#to.clone().multiply(this.#from.clone().invert());
     if (rel.w < 0) rel.set(-rel.x, -rel.y, -rel.z, -rel.w);
     const s = Math.sqrt(Math.max(0, 1 - rel.w * rel.w));
-    this.#spinAxis.set(rel.x, rel.y, rel.z).divideScalar(s || 1);
-    this.#axis.quaternion.setFromUnitVectors(
+    const axis = new THREE.Vector3(rel.x, rel.y, rel.z).divideScalar(s || 1);
+    this.#turnAxis.quaternion.setFromUnitVectors(
       new THREE.Vector3(0, 1, 0),
-      this.#spinAxis,
+      axis,
     );
-    this.#axis.material.color.set(color).multiplyScalar(3);
+    this.#turnAxis.material.color.set(color);
     this.#spin = 0;
     this.#pop = 1;
     this.#hit = 1;
@@ -266,95 +335,92 @@ export class EnemyView {
    * Moves the drawing on a frame.
    *
    * @param dt Seconds of game time
-   * @param eye Where the player is looking from — the frame turns to face it
-   * @param time The clock, for the idle wobble
+   * @param turret Where the turret is — the frame turns to face it across the floor
+   * @param time The clock, for the pulses
    */
-  update(dt: number, eye: THREE.Vector3, time: number): void {
+  update(dt: number, turret: THREE.Vector3, time: number): void {
     const [x, y, z] = this.enemy.pos;
+    const r = this.enemy.radius;
     this.frame.position.set(x, y, z);
-    this.frame.lookAt(eye);
+    this.frame.lookAt(turret.x, y, turret.z);
+    this.#shadow.position.set(x, 0.02, z);
+    this.#shadow.scale.setScalar(r * 1.1);
+    this.#ground.position.set(x, 0.03, z);
+    this.#ground.scale.setScalar(r * 1.05);
 
     this.#born = Math.min(1, this.#born + dt * 1.6);
     const grow = easeOutBack(this.#born);
 
     if (this.#spin < 1) {
-      this.#spin = Math.min(1, this.#spin + dt / 0.26);
+      this.#spin = Math.min(1, this.#spin + dt / 0.3);
       this.body.quaternion.slerpQuaternions(
         this.#from,
         this.#to,
-        easeOutBack(this.#spin, 1.3),
+        easeOutBack(this.#spin, 1.2),
       );
     } else {
       this.body.quaternion.copy(this.#to);
     }
+    const settled = this.#spin >= 1;
 
-    const athome = this.enemy.state === 0 && this.#spin >= 1;
+    const athome = this.enemy.state === 0 && settled;
     this.#home += ((athome ? 1 : 0) - this.#home) * Math.min(1, dt * 8);
     this.#pop = Math.max(0, this.#pop - dt * 5);
-    this.#hit = Math.max(0, this.#hit - dt * 3.2);
+    this.#hit = Math.max(0, this.#hit - dt * 4);
 
-    // Squash on impact, a slow breathing otherwise, and a heartbeat when it is at `e`.
-    const beat = athome ? Math.pow(0.5 + 0.5 * Math.sin(time * 9), 4) : 0;
-    const breathe = 1 + Math.sin(time * 2 + this.enemy.id) * 0.025;
-    const pop = 1 + this.#pop * 0.22;
-    this.body.scale.setScalar(grow * breathe * pop * (1 + beat * 0.05));
+    const beat = athome ? Math.pow(0.5 + 0.5 * Math.sin(time * 7), 3) : 0;
+    const pop = 1 + this.#pop * 0.15;
+    this.body.scale.setScalar(grow * pop);
 
-    this.#faceMat.emissiveIntensity = 0.08 + this.#hit * 0.9;
-    this.#eMat.color.setScalar(0.85 + this.#home * (0.35 + beat * 0.35));
-    this.#shellMat.opacity = 0.3 + this.#hit * 0.5;
-    this.#halo.material.opacity = this.#home * (0.25 + beat * 0.25);
-    this.#lock.material.opacity = this.#home * 0.7;
-    this.#lock.rotation.z = time * 2.4;
-    this.#lock.scale.setScalar(1 + (1 - this.#home) * 0.8);
-    this.#axis.material.opacity = this.#spin < 1 ? (1 - this.#spin) * 1.2 : 0;
+    this.#faceMat.emissiveIntensity = this.#hit * 0.35;
+    this.#eMat.emissiveIntensity = this.#home * (0.15 + beat * 0.2);
+    this.#edgeMat.color.set(0x120c1c).lerp(new THREE.Color(GOLD), this.#home);
+    this.#socketMat.opacity = 0.85 * (1 - this.#home);
+    this.#ground.material.color.set(SPECIES_COLORS[this.enemy.species.id])
+      .lerp(new THREE.Color(GOLD), this.#home);
+    this.#ground.material.opacity = 0.35 + this.#home * (0.3 + beat * 0.3);
 
-    // The green frame shows once the turn has landed, on whichever ring the `e` face is on, and
-    // blazes when the `e` face is sitting in it — that is the moment for ⇅.
-    const g = guide(this.enemy.species, this.enemy.state);
-    const settled = this.#spin >= 1;
-    if (settled && g.frame !== this.#frameFace && g.frame !== null) {
-      const { vertices, faces } = this.enemy.species.solid;
-      const [x, y, z] = faceNormal(vertices, faces[g.frame]);
-      this.#socket.position.set(x * REACH, y * REACH, z * REACH);
-      const r = Math.hypot(x, y) * REACH;
-      this.#orbit.position.set(0, 0, z * REACH);
-      this.#orbit.scale.set(Math.max(r, 1e-3), Math.max(r, 1e-3), 1);
-    }
-    if (settled) this.#frameFace = g.frame;
-    const want = settled && g.frame !== null ? 1 : 0;
-    this.#frameShown += (want - this.#frameShown) * Math.min(1, dt * 10);
-    this.#frameHot += ((g.advice === "flip" ? 1 : 0) - this.#frameHot) *
-      Math.min(1, dt * 10);
-    const flicker = 0.75 + 0.25 * Math.sin(time * 10);
-    this.#socket.material.opacity = this.#frameShown *
-      (0.7 + this.#frameHot * 0.3 * flicker);
-    this.#socket.scale.setScalar(1 + this.#frameHot * 0.35 * flicker);
-    this.#orbit.material.opacity = this.#frameShown * (1 - this.#frameHot) *
-      0.5;
+    // The turn's axis, fading as it lands.
+    this.#turnAxis.material.opacity = settled ? 0 : (1 - this.#spin) * 0.9;
 
-    // The ghost is for when the `e` face is turned away; facing the player the real one shows.
-    const facing =
-      new THREE.Vector3(0, 0, 1).applyQuaternion(this.body.quaternion).z;
-    this.#ghostMat.opacity = 0.55 * Math.max(0, Math.min(1, 1 - facing * 1.5));
-    this.#needleMat.opacity = 0.9 - this.#home * 0.6;
+    // The pointer's spot and its axis. Hidden mid-turn: the spot is moving with the body.
+    const aimOn = this.#aim !== null && settled ? 1 : 0;
+    this.#aimRing.material.opacity = aimOn * 0.95;
+    this.#aimAxis.material.opacity = aimOn * 0.55;
+    const ringPulse = 1 + Math.sin(time * 10) * 0.12;
+    this.#aimRing.scale.setScalar(ringPulse);
+
+    const hintOn = this.#hint !== null && settled && !athome ? 1 : 0;
+    this.#hintRing.material.opacity = hintOn *
+      (0.65 + 0.35 * Math.sin(time * 6));
+    this.#hintRing.scale.setScalar(1 + 0.25 * (0.5 + 0.5 * Math.sin(time * 6)));
+    this.#hintLabel.material.opacity = hintOn;
+
+    this.#ownAxis.material.opacity = this.#axis !== null && settled ? 0.7 : 0;
   }
 
   dispose(): void {
-    this.#ghostMat.dispose();
-    this.#needleMat.dispose();
-    this.#socket.geometry.dispose();
-    this.#socket.material.dispose();
-    this.#orbit.geometry.dispose();
-    this.#orbit.material.dispose();
     this.#faceMat.dispose();
     this.#eMat.dispose();
     this.#edgeMat.dispose();
-    this.#shellMat.dispose();
-    this.#halo.material.dispose();
-    this.#lock.geometry.dispose();
-    this.#lock.material.dispose();
-    this.#axis.geometry.dispose();
-    this.#axis.material.dispose();
+    this.#socketMat.dispose();
+    for (
+      const m of [
+        this.#aimRing,
+        this.#aimAxis,
+        this.#hintRing,
+        this.#ownAxis,
+        this.#turnAxis,
+      ]
+    ) {
+      m.geometry.dispose();
+      m.material.dispose();
+    }
+    this.#hintLabel.material.dispose();
+    this.#shadow.geometry.dispose();
+    this.#shadow.material.dispose();
+    this.#ground.geometry.dispose();
+    this.#ground.material.dispose();
   }
 }
 
@@ -367,9 +433,9 @@ function easeOutBack(t: number, s = 1.70158): number {
 /**
  * The shared geometry of one species, built on first use.
  *
- * The faces are one mesh with a colour per face; the `e` face is drawn again on top with the
- * glyph, its texture coordinates laid flat across it in the home pose so the `e` reads upright
- * exactly when the enemy is at `e`.
+ * The faces are one mesh with a colour per face; the `e` face is its own mesh with the glyph, its
+ * texture coordinates laid flat across it in the home pose so the `e` reads upright exactly when
+ * the enemy is at `e`.
  */
 function kit(species: Species): Kit {
   const cached = kits.get(species.id);
@@ -378,9 +444,9 @@ function kit(species: Species): Kit {
   const { vertices, faces, kind } = species.solid;
   const colors = faces.map((_, i) =>
     i === 0
-      ? GOLD
+      ? E_FACE
       : kind === "plate" && i === 1
-      ? "#5b1030"
+      ? "#3a2a4a"
       : FACE_COLORS[(i - 1 + species.order) % FACE_COLORS.length]
   );
 
@@ -388,9 +454,8 @@ function kit(species: Species): Kit {
   const col: number[] = [];
   const c = new THREE.Color();
   faces.forEach((face, fi) => {
+    if (fi === 0) return;
     c.set(colors[fi]);
-    // The `e` face underneath its glyph is dark, so the gold glyph is what glows.
-    if (fi === 0) c.set("#1a0f00");
     for (let k = 1; k < face.length - 1; k++) {
       for (const vi of [face[0], face[k], face[k + 1]]) {
         pos.push(...vertices[vi]);
@@ -403,7 +468,7 @@ function kit(species: Species): Kit {
   faceGeo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
   faceGeo.computeVertexNormals();
 
-  // The `e` face again, a hair proud of the solid, textured.
+  // The `e` face, textured.
   const front = faces[0];
   const n = faceNormal(vertices, front);
   const centre = faceCentre(vertices, front);
@@ -416,11 +481,11 @@ function kit(species: Species): Kit {
         (a[1] + b[1]) / 2 - centre[1],
       );
     }),
-  ) * 1.15;
+  ) * 1.25;
   const ePos: number[] = [];
   const eUv: number[] = [];
   const push = (v: readonly number[]) => {
-    ePos.push(v[0] + n[0] * 0.004, v[1] + n[1] * 0.004, v[2] + n[2] * 0.004);
+    ePos.push(v[0], v[1], v[2]);
     eUv.push(
       (v[0] - centre[0]) / (2 * r) + 0.5,
       (v[1] - centre[1]) / (2 * r) + 0.5,
@@ -434,6 +499,7 @@ function kit(species: Species): Kit {
   const eGeo = new THREE.BufferGeometry();
   eGeo.setAttribute("position", new THREE.Float32BufferAttribute(ePos, 3));
   eGeo.setAttribute("uv", new THREE.Float32BufferAttribute(eUv, 2));
+  eGeo.computeVertexNormals();
 
   // Every edge once.
   const seen = new Set<string>();
@@ -451,20 +517,70 @@ function kit(species: Species): Kit {
   const edgeGeo = new THREE.BufferGeometry();
   edgeGeo.setAttribute("position", new THREE.Float32BufferAttribute(lines, 3));
 
-  const needle = new THREE.Vector3(...n).multiplyScalar(REACH);
+  // The socket: the `e` face's outline, a little larger and a little proud of it, dashed. Every
+  // pose of the solid has a face in that plane, so nothing of the body ever pokes through it.
+  const socket = dashedOutline(
+    front.map((i) => {
+      const v = vertices[i];
+      return new THREE.Vector3(
+        centre[0] + (v[0] - centre[0]) * 1.12,
+        centre[1] + (v[1] - centre[1]) * 1.12,
+        centre[2] + (v[2] - centre[2]) * 1.12,
+      ).addScaledVector(new THREE.Vector3(...n), 0.04);
+    }),
+    new THREE.Vector3(...n),
+    0.045,
+  );
 
-  const made = {
+  const made: Kit = {
     faces: faceGeo,
     eFace: eGeo,
     edges: edgeGeo,
+    socket,
     colors,
-    needle,
   };
   kits.set(species.id, made);
   return made;
 }
 
-/** The glyph on the `e` face: a gold `e` inside a gold border, on nothing. */
+/** A closed polygon drawn as flat dashes of a given width, lying in the plane with normal `n`. */
+function dashedOutline(
+  points: THREE.Vector3[],
+  n: THREE.Vector3,
+  width: number,
+): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const dash = 0.13;
+  const gap = 0.08;
+  const quad = (a: THREE.Vector3, b: THREE.Vector3) => {
+    const dir = b.clone().sub(a).normalize();
+    const side = n.clone().cross(dir).multiplyScalar(width / 2);
+    const p = [
+      a.clone().sub(side),
+      a.clone().add(side),
+      b.clone().add(side),
+      b.clone().sub(side),
+    ];
+    for (const i of [0, 1, 2, 0, 2, 3]) pos.push(p[i].x, p[i].y, p[i].z);
+  };
+  points.forEach((a, i) => {
+    const b = points[(i + 1) % points.length];
+    const len = a.distanceTo(b);
+    // Dashes centred on the edge, so every corner gets the same look.
+    const count = Math.max(1, Math.round((len + gap) / (dash + gap)));
+    const step = len / count;
+    for (let k = 0; k < count; k++) {
+      const t0 = (k * step + gap / 2) / len;
+      const t1 = ((k + 1) * step - gap / 2) / len;
+      quad(a.clone().lerp(b, t0), a.clone().lerp(b, t1));
+    }
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  return geo;
+}
+
+/** The `e` face's picture: an ink `e` on white, with a bar under it so which way is up is plain. */
 function eGlyph(): THREE.Texture {
   if (eTexture) return eTexture;
   const size = 256;
@@ -472,56 +588,72 @@ function eGlyph(): THREE.Texture {
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
-  const g = ctx.createRadialGradient(
-    size / 2,
-    size / 2,
-    10,
-    size / 2,
-    size / 2,
-    size * 0.6,
-  );
-  g.addColorStop(0, "#fff1a8");
-  g.addColorStop(0.55, "#ffd23f");
-  g.addColorStop(1, "#ff9d1c");
-  ctx.fillStyle = g;
+  ctx.fillStyle = E_FACE;
   ctx.fillRect(0, 0, size, size);
-  // Dark on gold rather than light on dark: under the bloom a bright letter melts into its own
-  // glow, while a dark one on a glowing face stays sharp at any distance.
-  ctx.fillStyle = "#2a0d00";
-  ctx.font = `900 ${size * 0.62}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.fillStyle = E_INK;
+  ctx.font = `900 ${size * 0.66}px "Helvetica Neue", Arial, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("e", size / 2, size * 0.47);
-  // A bar under the glyph, so which way is up is never in doubt.
-  ctx.fillRect(size * 0.3, size * 0.8, size * 0.4, size * 0.05);
+  ctx.fillText("e", size / 2, size * 0.45);
+  ctx.fillRect(size * 0.28, size * 0.78, size * 0.44, size * 0.07);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
   eTexture = texture;
   return texture;
 }
 
-/** A tapered spike from the middle of the solid out to a point: thick inside, sharp at the tip. */
-function needleGeometry(to: THREE.Vector3): THREE.BufferGeometry {
-  const length = to.length();
-  const geo = new THREE.ConeGeometry(0.07, length, 8, 1, true);
-  geo.translate(0, length / 2, 0);
-  geo.applyQuaternion(
-    new THREE.Quaternion().setFromUnitVectors(
-      new THREE.Vector3(0, 1, 0),
-      to.clone().normalize(),
-    ),
-  );
-  return geo;
+/** A round badge with a glyph on it, for the hint. */
+function label(text: string, color: string): THREE.Texture {
+  const key = `${text}|${color}`;
+  const cached = labels.get(key);
+  if (cached) return cached;
+  const h = 128;
+  const w = text.length > 1 ? 200 : 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "rgba(10, 6, 20, 0.85)";
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.roundRect(6, 6, w - 12, h - 12, (h - 12) / 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.font = `900 ${h * 0.6}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, w / 2, h * 0.54);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  labels.set(key, texture);
+  return texture;
 }
 
-/** A unit circle in the XY plane, as a line loop. */
-function circle(segments: number): THREE.BufferGeometry {
-  const points: number[] = [];
-  for (let i = 0; i < segments; i++) {
-    const a = (i / segments) * Math.PI * 2;
-    points.push(Math.cos(a), Math.sin(a), 0);
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
-  return geo;
+let shadowTex: THREE.Texture | null = null;
+
+/** A soft dark disc. */
+function shadowTexture(): THREE.Texture {
+  if (shadowTex) return shadowTex;
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const g = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    0,
+    size / 2,
+    size / 2,
+    size / 2,
+  );
+  g.addColorStop(0, "rgba(0,0,0,0.9)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  shadowTex = new THREE.CanvasTexture(canvas);
+  return shadowTex;
 }

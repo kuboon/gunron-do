@@ -10,7 +10,7 @@
  * rather than clipped.
  */
 
-import type { Shot } from "./groups.ts";
+import type { Spin } from "./groups.ts";
 
 const MUTE_KEY = "gun-shooter:muted";
 
@@ -45,8 +45,8 @@ class Sound {
   }
 
   /** An element round leaving the barrel — each round has its own pitch. */
-  shot(shot: Shot): void {
-    const base = shot === "ccw" ? 1320 : shot === "cw" ? 1040 : 760;
+  shot(spin: Spin): void {
+    const base = spin === "ccw" ? 1320 : 1040;
     this.#tone({
       type: "square",
       from: base,

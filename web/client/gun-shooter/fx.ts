@@ -115,7 +115,7 @@ export class Fx {
           void main() {
             float d = length(gl_PointCoord - 0.5);
             float a = smoothstep(0.5, 0.0, d);
-            gl_FragColor = vec4(vColor * (a * a * 2.5), a * vAlpha);
+            gl_FragColor = vec4(vColor * (a * a * 1.6), a * vAlpha);
           }`,
     });
     const sparks = new THREE.Points(g, this.#sparkMaterial);
@@ -248,7 +248,7 @@ export class Fx {
       this.#shardAge[i] = 0;
       this.#shards.setColorAt(
         i,
-        tmpC.set(colors[n % colors.length]).multiplyScalar(1.6),
+        tmpC.set(colors[n % colors.length]),
       );
     }
     if (this.#shards.instanceColor) {
@@ -290,7 +290,7 @@ export class Fx {
     }
     ring.mesh.visible = true;
     ring.mesh.position.copy(at);
-    ring.mesh.material.color.set(color).multiplyScalar(2);
+    ring.mesh.material.color.set(color).multiplyScalar(1.1);
     Object.assign(ring, { from, to, life, age: 0 });
   }
 
@@ -337,7 +337,7 @@ export class Fx {
     beam.mesh.position.copy(from);
     beam.mesh.quaternion.setFromUnitVectors(UP, dir.normalize());
     beam.mesh.scale.set(width, len, width);
-    beam.mesh.material.color.set(color).multiplyScalar(2.2);
+    beam.mesh.material.color.set(color).multiplyScalar(1.3);
     Object.assign(beam, { width, life, age: 0, opacity });
   }
 
@@ -372,7 +372,7 @@ export class Fx {
     }
     flash.mesh.visible = true;
     flash.mesh.position.copy(at);
-    flash.mesh.material.color.set(color).multiplyScalar(3);
+    flash.mesh.material.color.set(color).multiplyScalar(1.3);
     Object.assign(flash, { size, life, age: 0 });
   }
 
@@ -523,7 +523,7 @@ export class Fx {
       .gs-pop {
         position: absolute; pointer-events: none; white-space: nowrap;
         font-weight: 900; letter-spacing: 0.04em;
-        text-shadow: 0 0 8px currentColor, 0 0 22px currentColor, 0 2px 0 #000;
+        text-shadow: 0 0 6px rgba(0,0,0,.95), 0 2px 0 #000, 0 0 14px rgba(0,0,0,.6);
         transform: translate(-50%, -50%);
         animation: gs-pop 1.1s cubic-bezier(.2,1.6,.4,1) forwards;
         font-family: "Hiragino Maru Gothic ProN", "BIZ UDPGothic", system-ui, sans-serif;

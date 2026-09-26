@@ -1,25 +1,24 @@
 /**
  * The enemies' bodies: five solids, each set up so that its "home" pose means something.
  *
- * Every solid is built the same way round. One face — the `e` face — looks straight at the player
+ * Every solid is built the same way round. One face — the `e` face — looks straight at the turret
  * along `+Z`, and it sits flat on its bottom edge, the way a letter sits on a line. That pose is
  * the identity, and every other pose the enemy can be in is one rotation of it away.
  *
- * The two shots are defined against that pose, too, and that is what makes them a pair of
- * generators rather than two arbitrary turns:
+ * Each solid also carries two turns that land it on itself, which `groups.ts` uses to generate
+ * its whole rotation group:
  *
- * - **twist** turns the solid about the axis pointing at the player, by one face-corner's worth —
- *   `360° / n` for an `n`-gon face. The face still faces you; only which way up it is changes.
- * - **flip** turns it half a turn about the axis through the midpoint of the front face's bottom
- *   edge. That axis is always a two-fold symmetry axis of these solids, so the half turn lands the
- *   solid on itself — but tips the face you were looking at down and away, and brings another up.
+ * - a **twist** about the axis pointing out of the `e` face, by one face-corner's worth —
+ *   `360° / n` for an `n`-gon face;
+ * - a **flip**, half a turn about the axis through the midpoint of the front face's bottom edge,
+ *   which is always a two-fold symmetry axis of these solids.
  *
  * A plate is the one exception to "the bottom edge": its front face is a whole side of it, and the
  * half turn has to go through the plate's middle, so its flip axis is the one straight down — the
  * plate is turned over like a coin.
  *
  * Nothing here knows about three.js. The engine builds meshes from these numbers, and the group
- * that the two shots generate is worked out from them in `groups.ts`.
+ * and the spots a round can land on are worked out from them in `groups.ts`.
  */
 
 import {

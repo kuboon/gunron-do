@@ -1,16 +1,22 @@
 /**
- * The screen: three.js, the player's aim, and every bit of juice.
+ * The screen: three.js, the pointer, and the juice.
  *
  * Loaded by the arena island only once it is in a browser, so neither the server nor the first
- * paint carries three.js. From then on it runs the frame: it turns the pointer into an aim, the
- * aim into "this shot at that enemy", hands that to the rules in `game.ts`, and draws whatever the
- * rules say happened — as loudly as it can.
+ * paint carries three.js. From then on it runs the frame: it turns the pointer into "this spot of
+ * that enemy", hands shots at it to the rules in `game.ts`, and draws whatever the rules say
+ * happened.
  *
- * The juice is layered per event and scaled to how much the event matters (see the `game-feel`
- * notes in the README): a round landing is a spark, a pop and a tick of shake; the `e` face coming
- * home is a chime and a halo; an e砲 kill is a hit-stop, a shockwave, a white flash, a shower of
- * shards, a punch of the field of view and a burst of chromatic aberration, all inside a tenth of
- * a second and all gone again within one. Shake moves the camera's drawing and never its aim.
+ * The view is from above and behind the turret, looking out over the field, so every enemy is seen
+ * from roughly the side that faces the turret — the side its `e` face belongs on. The pointer
+ * works on the solid itself: a ray from the camera finds the face under it, and the face snaps it
+ * to the nearest spot a round can land on (its middle, a corner, an edge's middle). With a mouse
+ * that is hover and click — left for 左回し, right for 右回し, Space for the e砲. On a touch screen a
+ * tap picks the spot and the buttons fire at it.
+ *
+ * The juice is scaled to how much an event matters and kept off the enemies themselves: a round
+ * landing is a tracer, a few sparks and a thump; the `e` face coming home is a chime and a gold
+ * ring on the floor; an e砲 kill is a hit-stop, shards, a shockwave and a short slow motion. The
+ * enemies are never bloomed, so the `e` on one is always legible.
  */
 
 import * as THREE from "three";
@@ -20,17 +26,29 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 
-import { EnemyView, faceColors } from "./enemy-view.ts";
+import { EnemyView, faceColors, spotAt } from "./enemy-view.ts";
 import { Fx } from "./fx.ts";
-import { type Enemy, EYE, game, type GameEvent, type Orb } from "./game.ts";
-import type { Shot } from "./groups.ts";
+import {
+  type Aim,
+  type Enemy,
+  game,
+  type GameEvent,
+  type Orb,
+  TURRET,
+} from "./game.ts";
+import { reachable, type Spin } from "./groups.ts";
 import { DANGER, GOLD, NIGHT, SHOT_COLORS, SPECIES_COLORS } from "./palette.ts";
 import { sound } from "./sound.ts";
 import { buildStage } from "./stage.ts";
 
-const BASE_FOV = 74;
-const MOUSE_SENSITIVITY = 0.0022;
-const TOUCH_SENSITIVITY = 0.0055;
+/** Where the camera looks: a little beyond the middle of the field. */
+const LOOK_AT = new THREE.Vector3(0, 0, -17);
+
+/**
+ * How steeply the camera looks down, in radians. A portrait screen looks down more steeply, so the
+ * field's depth fills its height instead of its bottom half being empty floor.
+ */
+const ELEVATION = { landscape: 0.46, portrait: 0.8 } as const;
 
 /**
  * Starts the game screen in a box.
@@ -52,81 +70,75 @@ export function start(host: HTMLElement): () => void {
   });
   renderer.setPixelRatio(Math.min(devicePixelRatio, coarse ? 1.5 : 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.95;
+  renderer.toneMappingExposure = 1.05;
   renderer.domElement.className = "gs-canvas";
   host.append(renderer.domElement);
 
   const overlay = document.createElement("div");
   overlay.className = "gs-overlay";
   host.append(overlay);
-  const brackets = document.createElement("div");
-  brackets.className = "gs-brackets";
-  overlay.append(brackets);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(NIGHT);
-  scene.fog = new THREE.FogExp2(0x12052a, 0.011);
+  scene.fog = new THREE.Fog(NIGHT, 80, 170);
 
-  const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.05, 1200);
-  camera.position.set(...EYE);
+  const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 900);
   scene.add(camera);
 
-  scene.add(new THREE.HemisphereLight(0x9b8cff, 0x2a0830, 1.1));
-  const key = new THREE.DirectionalLight(0xffffff, 1.6);
-  key.position.set(0.3, 1, 0.6);
-  camera.add(key);
-  const rim = new THREE.DirectionalLight(0xff4fd8, 1.2);
-  rim.position.set(-1, 0.4, -1);
-  scene.add(rim);
+  // Plain, even light from the turret's side, so every face an enemy turns towards the player is
+  // lit and the colours stay what they are.
+  scene.add(new THREE.HemisphereLight(0xe4ddff, 0x241638, 1.5));
+  const key = new THREE.DirectionalLight(0xffffff, 2.1);
+  key.position.set(-7, 16, 12);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0xbfd4ff, 0.6);
+  fill.position.set(9, 6, 8);
+  scene.add(fill);
 
   const stage = buildStage(scene);
   const fx = new Fx(scene, camera, overlay);
-  const glow = glowTexture();
-  const gun = buildGun(camera, glow);
+  const turret = buildTurret(scene);
+  const turretAt = new THREE.Vector3(...TURRET);
 
   // --- post ------------------------------------------------------------------------------------
 
-  const composer = new EffectComposer(renderer);
+  const target = new THREE.WebGLRenderTarget(1, 1, {
+    type: THREE.HalfFloatType,
+    samples: coarse ? 2 : 4,
+  });
+  const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
+  // Only what is brighter than white blooms: the tracers, sparks and blasts. The enemies and the
+  // floor are lit normally and never get there.
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(256, 256),
-    0.85,
-    0.5,
-    0.6,
+    0.55,
+    0.3,
+    0.92,
   );
   composer.addPass(bloom);
   const grade = new ShaderPass({
     uniforms: {
       tDiffuse: { value: null },
-      uAberration: { value: 0 },
       uFlash: { value: 0 },
       uFlashColor: { value: new THREE.Color(1, 1, 1) },
       uDamage: { value: 0 },
-      uTime: { value: 0 },
     },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
       void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */ `
       uniform sampler2D tDiffuse;
-      uniform float uAberration;
       uniform float uFlash;
       uniform vec3 uFlashColor;
       uniform float uDamage;
-      uniform float uTime;
       varying vec2 vUv;
       void main() {
-        vec2 d = vUv - 0.5;
-        float r = length(d);
-        vec2 off = d * (0.004 + uAberration) * (0.4 + r);
-        vec3 col;
-        col.r = texture2D(tDiffuse, vUv + off).r;
-        col.g = texture2D(tDiffuse, vUv).g;
-        col.b = texture2D(tDiffuse, vUv - off).b;
-        col *= 1.0 - smoothstep(0.42, 0.95, r) * 0.6;
-        col = mix(col, vec3(1.4, 0.02, 0.08), uDamage * smoothstep(0.2, 0.85, r));
+        vec3 col = texture2D(tDiffuse, vUv).rgb;
+        float r = length(vUv - 0.5);
+        col *= 1.0 - smoothstep(0.5, 0.95, r) * 0.45;
+        col = mix(col, vec3(1.0, 0.05, 0.1), uDamage * smoothstep(0.3, 0.85, r));
         col += uFlashColor * uFlash;
-        col *= 0.97 + 0.03 * sin(vUv.y * 1100.0 + uTime * 30.0);
         gl_FragColor = vec4(col, 1.0);
       }`,
   });
@@ -136,11 +148,9 @@ export function start(host: HTMLElement): () => void {
   // --- state ------------------------------------------------------------------------------------
 
   const views = new Map<number, EnemyView>();
-  let yaw = 0;
-  let pitch = 0.04;
+  /** The state each view last had its hints worked out for. */
+  const hinted = new Map<number, string>();
   let trauma = 0;
-  let fovKick = 0;
-  let aberration = 0;
   let flash = 0;
   let damage = 0;
   let pulse = 1;
@@ -148,21 +158,51 @@ export function start(host: HTMLElement): () => void {
   let slowmo = 1;
   let clock = 0;
   let shakeT = 0;
-  let lookAt: { yaw: number; pitch: number } | null = null;
   let running = true;
   let last = performance.now();
-  const eye = new THREE.Vector3(...EYE);
-  const forward = new THREE.Vector3();
+  const basePos = new THREE.Vector3();
   const tmp = new THREE.Vector3();
   const tmp2 = new THREE.Vector3();
-  const baseQuat = new THREE.Quaternion();
-  const euler = new THREE.Euler(0, 0, 0, "YXZ");
 
   const addTrauma = (t: number) => {
-    trauma = Math.min(1, trauma + t * (reduced ? 0.35 : 1));
+    trauma = Math.min(1, trauma + t * (reduced ? 0.3 : 1));
   };
 
   // --- sizing -----------------------------------------------------------------------------------
+
+  /**
+   * Backs the camera off until the whole field fits: the far edge where enemies come in, and the
+   * turret at the bottom. A portrait screen also narrows the field itself, so the enemies are not
+   * specks.
+   */
+  const fit = (w: number, h: number) => {
+    const portrait = w < h;
+    game.fieldScale = portrait ? 0.55 : 1;
+    camera.aspect = w / h;
+    camera.fov = portrait ? 52 : 42;
+    camera.updateProjectionMatrix();
+    const half = 18 * game.fieldScale + 3;
+    const must = [
+      new THREE.Vector3(-half, 0, -44),
+      new THREE.Vector3(half, 0, -44),
+      new THREE.Vector3(0, 6, -46),
+      new THREE.Vector3(0, 0, 2.5),
+    ];
+    const e = portrait ? ELEVATION.portrait : ELEVATION.landscape;
+    const dir = new THREE.Vector3(0, Math.sin(e), Math.cos(e));
+    const p = new THREE.Vector3();
+    for (let d = 12; d < 260; d += 0.5) {
+      camera.position.copy(LOOK_AT).addScaledVector(dir, d);
+      camera.lookAt(LOOK_AT);
+      camera.updateMatrixWorld(true);
+      const ok = must.every((v) => {
+        p.copy(v).project(camera);
+        return Math.abs(p.x) < 0.96 && p.y < 0.9 && p.y > -0.92;
+      });
+      if (ok) break;
+    }
+    basePos.copy(camera.position);
+  };
 
   const resize = () => {
     const w = Math.max(1, host.clientWidth);
@@ -170,40 +210,175 @@ export function start(host: HTMLElement): () => void {
     renderer.setSize(w, h, false);
     composer.setSize(w, h);
     bloom.resolution.set(w / 2, h / 2);
-    camera.aspect = w / h;
-    // A tall phone gets a wider view, so the field is not a letterbox slot.
-    camera.fov = BASE_FOV + (w < h ? 14 : 0);
-    camera.updateProjectionMatrix();
+    fit(w, h);
     fx.resize(h * renderer.getPixelRatio(), camera.fov);
   };
   const observer = new ResizeObserver(resize);
   observer.observe(host);
   resize();
 
+  // --- picking -----------------------------------------------------------------------------------
+
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+
+  /** What is under a point on the screen: an orb, or a spot of an enemy. */
+  const pickAt = (
+    clientX: number,
+    clientY: number,
+  ): { orb: Orb } | { aim: Aim } | null => {
+    const rect = host.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    // An orb is small and quick, so it gets a generous circle on the screen.
+    let orb: Orb | null = null;
+    let orbD = coarse ? 40 : 28;
+    for (const o of game.orbs) {
+      tmp.set(...o.pos).project(camera);
+      const d = Math.hypot(
+        (tmp.x * 0.5 + 0.5) * rect.width - x,
+        (-tmp.y * 0.5 + 0.5) * rect.height - y,
+      );
+      if (d < orbD) {
+        orbD = d;
+        orb = o;
+      }
+    }
+    if (orb !== null) return { orb };
+
+    ndc.set((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    const meshes = [...views.values()].flatMap((v) => v.pickables);
+    for (const hit of raycaster.intersectObjects(meshes, false)) {
+      const view = hit.object.parent?.parent?.userData.view as
+        | EnemyView
+        | undefined;
+      if (!view || !view.enemy.alive) continue;
+      const local = view.body.worldToLocal(hit.point.clone());
+      const spot = spotAt(view.enemy, local);
+      const e = view.enemy;
+      return {
+        aim: {
+          enemy: e,
+          spot,
+          reachable: reachable(e.species, e.state, spot),
+        },
+      };
+    }
+    return null;
+  };
+
+  /** Where a spot of an enemy is in the world right now. */
+  const spotWorld = (aim: Aim, out: THREE.Vector3): THREE.Vector3 => {
+    const view = views.get(aim.enemy.id);
+    if (!view) return out.set(...aim.enemy.pos);
+    return view.body.localToWorld(
+      out.set(...aim.enemy.species.spots[aim.spot].point),
+    );
+  };
+
+  // --- firing ------------------------------------------------------------------------------------
+
+  const muzzle = new THREE.Vector3();
+
+  const shoot = (spin: Spin, aim: Aim | null) => {
+    if (!game.fire(spin, aim)) return;
+    turret.muzzle.getWorldPosition(muzzle);
+    const end = aim !== null
+      ? spotWorld(aim, tmp)
+      : tmp.copy(muzzle).add(turret.forward(tmp2).multiplyScalar(60));
+    const color = SHOT_COLORS[spin];
+    fx.beam(muzzle, end, color, 0.07, 0.16, 1);
+    fx.burst(muzzle, color, 5, { speed: 3, size: 0.12, life: 0.2 });
+    turret.kick(0.35);
+    sound.shot(spin);
+  };
+
+  const shootOrb = (orb: Orb) => {
+    if (!game.shootOrb(orb)) return;
+    turret.muzzle.getWorldPosition(muzzle);
+    fx.beam(muzzle, tmp.set(...orb.pos), 0xffffff, 0.06, 0.14, 1);
+    turret.kick(0.3);
+    sound.shot("cw");
+  };
+
+  /**
+   * The e砲, at what the aim is on — or, with nothing aimed at, at the nearest enemy that is
+   * home — straight through everything in line behind it.
+   */
+  const cannon = () => {
+    const aimed = game.aim?.enemy ??
+      game.enemies
+        .filter((e) => e.state === 0)
+        .sort((a, b) => dist2(a.pos) - dist2(b.pos))[0] ??
+      null;
+    turret.muzzle.getWorldPosition(muzzle);
+    const dir = aimed !== null
+      ? tmp2.set(...aimed.pos).sub(muzzle).normalize()
+      : turret.forward(tmp2);
+    const along = (p: readonly number[]) => {
+      const v = tmp.set(p[0], p[1], p[2]).sub(muzzle);
+      const t = v.dot(dir);
+      return { t, off: v.addScaledVector(dir, -t).length() };
+    };
+    const hits = game.enemies
+      .map((e) => ({ e, ...along(e.pos) }))
+      .filter(({ e, t, off }) => t > 0 && off < e.radius * 0.95)
+      .sort((a, b) => a.t - b.t)
+      .map(({ e }) => e);
+    const orbs = game.orbs.filter((o) => {
+      const { t, off } = along(o.pos);
+      return t > 0 && off < 1.2;
+    });
+    if (!game.cannon(hits, orbs)) return;
+    const reach = hits.length > 0
+      ? Math.sqrt(dist2(hits[hits.length - 1].pos)) + 12
+      : 70;
+    const end = muzzle.clone().addScaledVector(dir, reach);
+    fx.beam(muzzle, end, GOLD, 0.45, 0.4, 0.9);
+    fx.beam(muzzle, end, 0xffffff, 0.14, 0.26, 1);
+    fx.ring(muzzle.clone().addScaledVector(dir, 1.5), GOLD, 0.3, 2.4, 0.3);
+    turret.kick(1);
+    turret.face(end);
+    addTrauma(0.25);
+    sound.cannon();
+  };
+
   // --- input -------------------------------------------------------------------------------------
 
-  const locked = () => document.pointerLockElement === host;
+  /** A pointer on the field. With a mouse the spot under it is always the aim. */
+  const onPointerMove = (e: PointerEvent) => {
+    if (e.pointerType !== "mouse" || game.phase !== "playing") return;
+    const pick = pickAt(e.clientX, e.clientY);
+    host.style.cursor = pick === null
+      ? "default"
+      : "aim" in pick && !pick.aim.reachable
+      ? "not-allowed"
+      : "pointer";
+    if (pick !== null && "aim" in pick) game.setAim(pick.aim);
+  };
 
-  const onMouseMove = (e: MouseEvent) => {
-    if (!locked()) return;
-    turnBy(e.movementX * MOUSE_SENSITIVITY, e.movementY * MOUSE_SENSITIVITY);
+  const onPointerDown = (e: PointerEvent) => {
+    if (game.phase !== "playing") return;
+    const pick = pickAt(e.clientX, e.clientY);
+    if (e.pointerType === "mouse") {
+      e.preventDefault();
+      if (e.button !== 0 && e.button !== 2) return;
+      if (pick !== null && "orb" in pick) {
+        shootOrb(pick.orb);
+        return;
+      }
+      const aim = pick !== null && "aim" in pick ? pick.aim : null;
+      if (aim !== null) game.setAim(aim);
+      shoot(e.button === 0 ? "ccw" : "cw", aim);
+      return;
+    }
+    // A finger picks; the buttons fire. An orb, though, is popped on the spot.
+    if (pick !== null && "orb" in pick) shootOrb(pick.orb);
+    else if (pick !== null) game.setAim(pick.aim);
   };
-  const turnBy = (dx: number, dy: number) => {
-    yaw -= dx;
-    pitch = THREE.MathUtils.clamp(pitch - dy, -0.9, 1.1);
-    lookAt = null;
-  };
-  const onMouseDown = (e: MouseEvent) => {
-    if (!locked()) return;
-    e.preventDefault();
-    if (e.button === 0) game.command(game.selected);
-    else if (e.button === 2) game.command("cannon");
-  };
-  const onWheel = (e: WheelEvent) => {
-    if (!locked()) return;
-    e.preventDefault();
-    game.cycle(e.deltaY > 0 ? 1 : -1);
-  };
+
   const onKey = (e: KeyboardEvent) => {
     if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key.toLowerCase();
@@ -212,250 +387,140 @@ export function start(host: HTMLElement): () => void {
       game.notify();
       return;
     }
+    if (k === "escape" || k === "p") {
+      if (game.phase === "playing") game.pause();
+      else if (game.phase === "paused") game.resume();
+      return;
+    }
     if (game.phase !== "playing") return;
-    const map: Record<string, Shot | "cannon"> = {
-      q: "ccw",
-      e: "cw",
-      f: "flip",
-      r: "flip",
-      " ": "cannon",
-    };
-    const pick: Record<string, Shot> = { "1": "ccw", "2": "cw", "3": "flip" };
-    if (k in map) {
+    if (k === " ") {
       e.preventDefault();
-      game.command(map[k]);
-    } else if (k in pick) {
-      game.select(pick[k]);
+      game.command("cannon");
+    } else if (k === "q" || k === "a") {
+      game.command("ccw");
+    } else if (k === "e" || k === "d") {
+      game.command("cw");
     }
   };
   const onContext = (e: Event) => e.preventDefault();
-  const onLockChange = () => {
-    if (!locked() && game.phase === "playing" && !coarse) game.pause();
-  };
-
-  // Touch, and a mouse that has not been captured: drag to look, tap an enemy to swing to it.
-  let drag:
-    | { id: number; x: number; y: number; t: number; moved: number }
-    | null = null;
-  const onPointerDown = (e: PointerEvent) => {
-    if (locked()) return;
-    if (e.pointerType === "mouse" && game.phase === "playing" && !coarse) {
-      lockPointer(host);
-      return;
-    }
-    drag = {
-      id: e.pointerId,
-      x: e.clientX,
-      y: e.clientY,
-      t: performance.now(),
-      moved: 0,
-    };
-    host.setPointerCapture?.(e.pointerId);
-  };
-  const onPointerMove = (e: PointerEvent) => {
-    if (drag === null || e.pointerId !== drag.id) return;
-    const dx = e.clientX - drag.x;
-    const dy = e.clientY - drag.y;
-    drag.x = e.clientX;
-    drag.y = e.clientY;
-    drag.moved += Math.abs(dx) + Math.abs(dy);
-    const k = TOUCH_SENSITIVITY * (camera.fov / BASE_FOV);
-    turnBy(dx * k, dy * k);
-  };
-  const onPointerUp = (e: PointerEvent) => {
-    if (drag === null || e.pointerId !== drag.id) return;
-    const tap = drag.moved < 10 && performance.now() - drag.t < 300;
-    drag = null;
-    if (tap) swingTo(e.clientX, e.clientY);
-  };
-
-  /** A tap near an enemy turns the view onto it. */
-  const swingTo = (cx: number, cy: number) => {
-    const rect = host.getBoundingClientRect();
-    let best: Enemy | null = null;
-    let bestD = 70;
-    for (const enemy of game.enemies) {
-      tmp.set(...enemy.pos).project(camera);
-      if (tmp.z > 1) continue;
-      const sx = rect.left + (tmp.x * 0.5 + 0.5) * rect.width;
-      const sy = rect.top + (-tmp.y * 0.5 + 0.5) * rect.height;
-      const d = Math.hypot(sx - cx, sy - cy);
-      if (d < bestD) {
-        bestD = d;
-        best = enemy;
-      }
-    }
-    if (best === null) return;
-    tmp.set(...best.pos).sub(eye).normalize();
-    lookAt = { yaw: Math.atan2(-tmp.x, -tmp.z), pitch: Math.asin(tmp.y) };
-  };
-
-  document.addEventListener("mousemove", onMouseMove);
-  document.addEventListener("mousedown", onMouseDown);
-  document.addEventListener("keydown", onKey);
-  document.addEventListener("pointerlockchange", onLockChange);
-  host.addEventListener("wheel", onWheel, { passive: false });
-  host.addEventListener("contextmenu", onContext);
-  host.addEventListener("pointerdown", onPointerDown);
-  host.addEventListener("pointermove", onPointerMove);
-  host.addEventListener("pointerup", onPointerUp);
-  host.addEventListener("pointercancel", onPointerUp);
   const onVisibility = () => {
     if (document.hidden) game.pause();
   };
+
+  host.addEventListener("pointermove", onPointerMove);
+  host.addEventListener("pointerdown", onPointerDown);
+  host.addEventListener("contextmenu", onContext);
+  document.addEventListener("keydown", onKey);
   document.addEventListener("visibilitychange", onVisibility);
 
-  // --- aiming -------------------------------------------------------------------------------------
+  // --- the orbs ----------------------------------------------------------------------------------
 
-  /** How far off the crosshair an enemy is, less how big it looks. Negative is dead on. */
-  const offAim = (enemy: Enemy, assist: number): number => {
-    tmp.set(...enemy.pos).sub(eye);
-    const dist = tmp.length();
-    const angle = forward.angleTo(tmp);
-    const size = Math.atan2(enemy.radius * 0.95, dist);
-    return angle - size - assist;
-  };
-
-  /** The enemy under the crosshair, or the nearest to it within a forgiving cone. */
-  const pickTarget = (): Enemy | null => {
-    const assist = coarse ? 0.1 : 0.045;
-    let best: Enemy | null = null;
-    let bestD = 0;
-    for (const enemy of game.enemies) {
-      const d = offAim(enemy, assist);
-      if (d < 0 && (best === null || d < bestD)) {
-        best = enemy;
-        bestD = d;
-      }
-    }
-    return best;
-  };
-
-  /** Everything the e砲's beam passes through, nearest first. */
-  const beamHits = (): Enemy[] =>
-    game.enemies
-      .filter((e) => offAim(e, coarse ? 0.1 : 0.06) < 0)
-      .sort((a, b) => dist2(a.pos) - dist2(b.pos));
-
-  /** The orb nearest the crosshair, within a cone generous enough to snap-shoot one. */
-  const pickOrb = (assist = coarse ? 0.12 : 0.07): Orb | null => {
-    let best: Orb | null = null;
-    let bestD = 0;
-    for (const orb of game.orbs) {
-      tmp.set(...orb.pos).sub(eye);
-      const d = forward.angleTo(tmp) - Math.atan2(0.7, tmp.length()) - assist;
-      if (d < 0 && (best === null || d < bestD)) {
-        best = orb;
-        bestD = d;
-      }
-    }
-    return best;
-  };
-
-  // The orbs: a hot red core in a spinning cage, each its own little mesh.
   const orbViews = new Map<number, THREE.Group>();
-  const orbCore = new THREE.SphereGeometry(0.32, 16, 10);
-  const orbCage = new THREE.IcosahedronGeometry(0.62, 0);
+  const orbCore = new THREE.SphereGeometry(0.4, 16, 10);
+  const orbCage = new THREE.IcosahedronGeometry(0.75, 0);
   const orbCoreMat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(DANGER).multiplyScalar(2.2),
+    color: new THREE.Color(DANGER).multiplyScalar(1.6),
     toneMapped: false,
   });
   const orbCageMat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(0xff9a3d).multiplyScalar(1.8),
+    color: new THREE.Color(0xff9a3d),
     wireframe: true,
-    toneMapped: false,
   });
-
-  // --- events ------------------------------------------------------------------------------------
-
-  const muzzle = new THREE.Vector3();
   const removeOrb = (id: number) => {
     const view = orbViews.get(id);
     if (!view) return;
     scene.remove(view);
-    for (const child of view.children) {
-      if (child instanceof THREE.Sprite) child.material.dispose();
-    }
     orbViews.delete(id);
   };
+
+  // --- events ------------------------------------------------------------------------------------
+
+  const removeView = (id: number) => {
+    const view = views.get(id);
+    if (!view) return;
+    scene.remove(view.frame, ...view.floor);
+    view.dispose();
+    views.delete(id);
+    hinted.delete(id);
+  };
+
+  const above = (enemy: Enemy, k = 1.3) =>
+    tmp2.set(...enemy.pos).add(tmp.set(0, enemy.radius * k, 0)).clone();
 
   const handle = (ev: GameEvent) => {
     switch (ev.type) {
       case "spawn": {
-        const view = new EnemyView(ev.enemy, glow);
+        const view = new EnemyView(ev.enemy);
+        view.frame.userData.view = view;
         views.set(ev.enemy.id, view);
-        scene.add(view.frame);
+        scene.add(view.frame, ...view.floor);
         tmp.set(...ev.enemy.pos);
-        fx.flash(
-          tmp,
-          SPECIES_COLORS[ev.enemy.species.id],
-          ev.enemy.radius * 3,
-          0.5,
-        );
         fx.ring(
           tmp,
           SPECIES_COLORS[ev.enemy.species.id],
           0.5,
-          ev.enemy.radius * 4,
-          0.7,
+          ev.enemy.radius * 2.5,
+          0.5,
         );
-        if (ev.enemy.boss) {
-          addTrauma(0.6);
-          fx.ring(tmp, DANGER, 1, 30, 1.4);
-        }
+        if (ev.enemy.boss) addTrauma(0.4);
         break;
       }
       case "turn": {
         const view = views.get(ev.enemy.id);
-        const color = SHOT_COLORS[ev.shot];
-        tmp.set(...ev.enemy.pos);
+        const color = SHOT_COLORS[ev.spin];
+        const at = spotWorld(
+          { enemy: ev.enemy, spot: ev.spot, reachable: true },
+          new THREE.Vector3(),
+        );
         view?.turn(ev.from, ev.to, color);
-        fx.burst(tmp, color, 28, { speed: 9, size: 0.22, life: 0.5 });
-        fx.ring(tmp, color, ev.enemy.radius * 0.8, ev.enemy.radius * 2.2, 0.35);
-        addTrauma(0.08);
+        fx.burst(at, color, 16, { speed: 6, size: 0.16, life: 0.35 });
+        fx.ring(at, color, 0.2, 1.4, 0.25);
+        addTrauma(0.05);
         sound.hit();
-        // Warmer or colder: every shot says how far home it is now.
         if (!ev.home) {
-          const lift = tmp2.set(...ev.enemy.pos).add(
-            tmp.set(ev.enemy.radius * 1.1, ev.enemy.radius * 0.8, 0),
-          );
           fx.popup(
-            lift.clone(),
+            above(ev.enemy),
             `あと ${ev.left} ${ev.gain > 0 ? "▼" : "▲"}`,
-            ev.gain > 0 ? "#7dff9a" : DANGER,
+            ev.gain > 0 ? "#9dffb0" : DANGER,
             "md",
           );
+          break;
         }
-        if (ev.home) {
-          setTimeout(() => {
-            if (!ev.enemy.alive || ev.enemy.state !== 0) return;
-            sound.home();
-            tmp2.set(...ev.enemy.pos);
-            fx.popup(
-              tmp2.clone().add(tmp.set(0, ev.enemy.radius * 1.3, 0)),
-              "e!",
-              GOLD,
-              "lg",
-            );
-            fx.ring(
-              tmp2,
-              GOLD,
-              ev.enemy.radius * 1.2,
-              ev.enemy.radius * 3.5,
-              0.6,
-            );
-            fx.burst(tmp2, GOLD, 40, {
-              speed: 6,
-              size: 0.25,
-              life: 0.8,
-              gravity: -1,
-            });
-          }, 230);
-        }
+        // Home. In the fewest shots there are, that was the inverse: say so.
+        const inverse = ev.enemy.taken === ev.enemy.start;
+        setTimeout(() => {
+          if (!ev.enemy.alive || ev.enemy.state !== 0) return;
+          sound.home();
+          fx.popup(above(ev.enemy, 1.5), inverse ? "逆元!" : "e!", GOLD, "lg");
+          tmp.set(ev.enemy.pos[0], 0.1, ev.enemy.pos[2]);
+          fx.ring(
+            tmp,
+            GOLD,
+            ev.enemy.radius * 0.6,
+            ev.enemy.radius * 1.6,
+            0.45,
+          );
+        }, 260);
+        break;
+      }
+      case "scramble": {
+        views.get(ev.enemy.id)?.turn(ev.from, ev.to, "#ffffff");
+        fx.popup(
+          above(ev.enemy, 1.6),
+          `あと ${ev.enemy.lives} 回!`,
+          DANGER,
+          "lg",
+        );
         break;
       }
       case "miss":
-        if (ev.shot === "cannon") sound.miss();
+        if (ev.what === "far") {
+          const aim = game.aim;
+          if (aim !== null) {
+            fx.popup(above(aim.enemy), "裏側には届かない", DANGER, "sm");
+          }
+        }
+        if (ev.what === "cannon" || ev.what === "far") sound.miss();
         break;
       case "orb": {
         const view = new THREE.Group();
@@ -463,46 +528,31 @@ export function start(host: HTMLElement): () => void {
           new THREE.Mesh(orbCore, orbCoreMat),
           new THREE.Mesh(orbCage, orbCageMat),
         );
-        const halo = new THREE.Sprite(
-          new THREE.SpriteMaterial({
-            map: glow,
-            color: new THREE.Color(DANGER),
-            transparent: true,
-            opacity: 0.8,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            toneMapped: false,
-          }),
-        );
-        halo.scale.setScalar(2.2);
-        view.add(halo);
         view.position.set(...ev.orb.pos);
         orbViews.set(ev.orb.id, view);
         scene.add(view);
-        tmp.set(...ev.orb.pos);
-        fx.flash(tmp, DANGER, 1.2, 0.25);
-        fx.burst(tmp, 0xff9a3d, 14, { speed: 5, size: 0.18, life: 0.4 });
+        fx.burst(tmp.set(...ev.orb.pos), 0xff9a3d, 10, {
+          speed: 4,
+          size: 0.16,
+          life: 0.35,
+        });
         sound.enemyShot();
         break;
       }
       case "pop": {
         tmp.set(...ev.orb.pos);
-        fx.burst(tmp, 0xff9a3d, 50, { speed: 12, size: 0.22, life: 0.5 });
-        fx.burst(tmp, 0xffffff, 16, { speed: 6, size: 0.16, life: 0.3 });
-        fx.ring(tmp, DANGER, 0.3, 2.6, 0.3);
+        fx.burst(tmp, 0xff9a3d, 30, { speed: 9, size: 0.2, life: 0.45 });
+        fx.ring(tmp, DANGER, 0.3, 2.4, 0.3);
         fx.popup(tmp.clone(), `+${ev.points}`, "#ffb36b", "sm");
-        addTrauma(0.1);
+        addTrauma(0.06);
         sound.pop();
         removeOrb(ev.orb.id);
         break;
       }
       case "struck": {
         removeOrb(ev.orb.id);
-        damage = 0.9;
-        addTrauma(0.75);
-        aberration = 0.03;
-        flash = reduced ? 0.1 : 0.3;
-        (grade.uniforms.uFlashColor.value as THREE.Color).set(DANGER);
+        damage = 0.8;
+        addTrauma(0.6);
         sound.breach();
         break;
       }
@@ -510,144 +560,95 @@ export function start(host: HTMLElement): () => void {
         let big = false;
         ev.kills.forEach((kill, i) => {
           const e = kill.enemy;
-          big ||= e.boss || e.species.order >= 24;
+          big ||= (e.boss && kill.broken) || e.species.order >= 24;
           tmp.set(...e.pos);
-          const colors = faceColors(e.species);
           const scale = e.radius;
-          fx.flash(tmp, 0xffffff, scale * 1.6, 0.25);
-          fx.flash(tmp, GOLD, scale * 2.6, 0.5);
-          fx.ring(
-            tmp,
-            GOLD,
-            scale,
-            scale * (e.boss ? 16 : 7),
-            e.boss ? 1.2 : 0.7,
-          );
-          fx.ring(
-            tmp,
-            SPECIES_COLORS[e.species.id],
-            scale * 0.5,
-            scale * (e.boss ? 10 : 4.5),
-            0.9,
-          );
-          fx.shatter(
-            tmp,
-            colors,
-            e.boss ? 160 : 40 + e.species.order,
-            scale,
-            e.boss ? 16 : 11,
-          );
-          fx.burst(tmp, GOLD, e.boss ? 400 : 120, {
-            speed: e.boss ? 30 : 18,
-            size: 0.3,
-            life: 1.1,
-          });
-          fx.burst(tmp, SPECIES_COLORS[e.species.id], 80, {
-            speed: 12,
-            size: 0.35,
-            life: 1.4,
-            gravity: 2,
-          });
-          const lift = tmp.clone().add(tmp2.set(0, scale * 1.2, 0));
+          const lift = above(e);
           setTimeout(() => {
             fx.popup(
               lift,
               `+${kill.points.toLocaleString()}`,
               GOLD,
-              e.boss ? "xl" : "lg",
+              e.boss && kill.broken ? "xl" : "lg",
             );
             if (kill.perfect) {
               fx.popup(
-                lift.clone().add(tmp2.set(0, -scale * 1.4, 0)),
-                "PERFECT 最短!",
+                lift.clone().add(tmp2.set(0, -scale * 1.1, 0)),
+                "PERFECT",
                 "#7dffea",
                 "md",
               );
             }
           }, 60 + i * 90);
-          const view = views.get(e.id);
-          if (view) {
-            scene.remove(view.frame);
-            view.dispose();
-            views.delete(e.id);
+          if (!kill.broken) {
+            fx.ring(tmp, GOLD, scale, scale * 3, 0.5);
+            fx.burst(tmp, GOLD, 60, { speed: 10, size: 0.22, life: 0.6 });
+            return;
           }
+          fx.flash(tmp, GOLD, scale * 1.4, 0.3);
+          fx.ring(
+            tmp.clone().setY(0.2),
+            GOLD,
+            scale,
+            scale * (e.boss ? 9 : 4.5),
+            0.6,
+          );
+          fx.shatter(
+            tmp,
+            faceColors(e.species),
+            e.boss ? 120 : 30 + e.species.order,
+            scale,
+            e.boss ? 14 : 10,
+          );
+          fx.burst(tmp, GOLD, e.boss ? 240 : 70, {
+            speed: e.boss ? 22 : 13,
+            size: 0.24,
+            life: 0.9,
+          });
+          removeView(e.id);
         });
         if (ev.kills.length > 0) {
-          hitStop = ev.kills.some((k) => k.enemy.boss)
-            ? 0.28
-            : big
-            ? 0.12
-            : 0.075;
-          slowmo = ev.kills.length > 1 || big ? 0.25 : 0.55;
-          addTrauma(big ? 0.9 : 0.55);
-          fovKick = big ? 12 : 7;
-          aberration = big ? 0.03 : 0.018;
-          flash = reduced ? 0.1 : big ? 0.45 : 0.22;
+          hitStop = big ? 0.1 : 0.06;
+          slowmo = ev.kills.length > 1 || big ? 0.35 : 0.65;
+          addTrauma(big ? 0.55 : 0.3);
+          flash = reduced ? 0.04 : big ? 0.12 : 0.06;
           (grade.uniforms.uFlashColor.value as THREE.Color).set(0xfff1c0);
           pulse = 0;
           sound.explode(big);
           if (ev.kills.length > 1) {
             fx.popup(
-              eye.clone().add(forward.clone().multiplyScalar(8)).add(
-                tmp.set(0, 1.5, 0),
-              ),
+              above(ev.kills[0].enemy, 2.4),
               `${ev.kills.length}連 e砲!!`,
               "#ff8af1",
               "xl",
             );
           }
-          if (game.combo >= 2) {
-            fx.popup(
-              eye.clone().add(forward.clone().multiplyScalar(8)).add(
-                tmp.set(0, -1.2, 0),
-              ),
-              `${game.combo} COMBO`,
-              "#7df9ff",
-              "lg",
-            );
-          }
         }
         for (const e of ev.bounced) {
           tmp.set(...e.pos);
-          fx.burst(tmp, DANGER, 60, { speed: 14, size: 0.25, life: 0.6 });
-          fx.ring(tmp, DANGER, e.radius, e.radius * 3, 0.4);
-          fx.popup(
-            tmp.clone().add(tmp2.set(0, e.radius * 1.3, 0)),
-            "反発!  e じゃない",
-            DANGER,
-            "md",
-          );
+          fx.burst(tmp, DANGER, 36, { speed: 10, size: 0.2, life: 0.5 });
+          fx.ring(tmp, DANGER, e.radius, e.radius * 2.4, 0.35);
+          fx.popup(above(e), "反発!  e じゃない", DANGER, "md");
           sound.bounce();
-          addTrauma(0.25);
+          addTrauma(0.15);
         }
         break;
       }
       case "breach": {
-        const view = views.get(ev.enemy.id);
         tmp.set(...ev.enemy.pos);
-        fx.flash(tmp, DANGER, ev.enemy.radius * 4, 0.4);
-        fx.burst(tmp, DANGER, 160, { speed: 16, size: 0.3, life: 0.9 });
-        fx.shatter(tmp, faceColors(ev.enemy.species), 30, ev.enemy.radius, 9);
-        if (view) {
-          scene.remove(view.frame);
-          view.dispose();
-          views.delete(ev.enemy.id);
-        }
+        fx.flash(tmp, DANGER, ev.enemy.radius * 2, 0.35);
+        fx.burst(tmp, DANGER, 90, { speed: 12, size: 0.24, life: 0.7 });
+        fx.shatter(tmp, faceColors(ev.enemy.species), 24, ev.enemy.radius, 8);
+        removeView(ev.enemy.id);
         damage = 1;
-        addTrauma(1);
-        aberration = 0.04;
-        fovKick = -6;
+        addTrauma(0.8);
         sound.breach();
         break;
       }
       case "wave":
         sound.wave(ev.boss);
         pulse = 0;
-        if (ev.boss) {
-          addTrauma(0.5);
-          flash = 0.3;
-          (grade.uniforms.uFlashColor.value as THREE.Color).set(DANGER);
-        }
+        if (ev.boss) addTrauma(0.3);
         break;
       case "clear":
         sound.clear();
@@ -655,9 +656,8 @@ export function start(host: HTMLElement): () => void {
         break;
       case "over":
         sound.over();
-        addTrauma(0.8);
+        addTrauma(0.6);
         damage = 1;
-        if (locked()) document.exitPointerLock();
         break;
     }
   };
@@ -674,99 +674,27 @@ export function start(host: HTMLElement): () => void {
     let dt = real;
     if (hitStop > 0) {
       hitStop -= real;
-      dt = real * 0.02;
+      dt = real * 0.03;
     } else {
       dt = real * slowmo;
-      slowmo += (1 - slowmo) * Math.min(1, real * 2.2);
+      slowmo += (1 - slowmo) * Math.min(1, real * 2.5);
     }
     if (game.phase !== "playing") dt = game.phase === "paused" ? 0 : real;
     clock += dt;
 
-    // Aim first, so a shot fired this frame goes where the player sees the crosshair.
-    if (lookAt !== null) {
-      const dy = wrapAngle(lookAt.yaw - yaw);
-      yaw += dy * Math.min(1, real * 12);
-      pitch += (lookAt.pitch - pitch) * Math.min(1, real * 12);
-      if (Math.abs(dy) < 0.002 && Math.abs(lookAt.pitch - pitch) < 0.002) {
-        lookAt = null;
+    // The aim follows the enemy's state: a spot that was on the near side may not be after a turn.
+    const aim = game.aim;
+    if (aim !== null) {
+      if (!aim.enemy.alive) game.setAim(null);
+      else {
+        const r = reachable(aim.enemy.species, aim.enemy.state, aim.spot);
+        if (r !== aim.reachable) game.setAim({ ...aim, reachable: r });
       }
     }
-    euler.set(pitch, yaw, 0);
-    baseQuat.setFromEuler(euler);
-    forward.set(0, 0, -1).applyQuaternion(baseQuat);
-
-    const target = game.phase === "playing" ? pickTarget() : null;
-    // On a phone the aim leans gently onto whatever it is nearly on.
-    if (coarse && target !== null && drag === null && lookAt === null) {
-      tmp.set(...target.pos).sub(eye).normalize();
-      const ty = Math.atan2(-tmp.x, -tmp.z);
-      const tp = Math.asin(tmp.y);
-      yaw += wrapAngle(ty - yaw) * Math.min(1, real * 3);
-      pitch += (tp - pitch) * Math.min(1, real * 3);
-    }
-    game.aim(target);
 
     for (const cmd of game.takeCommands()) {
-      gun.muzzle.getWorldPosition(muzzle);
-      if (cmd === "cannon") {
-        const hits = beamHits();
-        const orbs = game.orbs.filter((o) => {
-          tmp.set(...o.pos).sub(eye);
-          return forward.angleTo(tmp) < Math.atan2(0.8, tmp.length()) + 0.06;
-        });
-        if (!game.cannon(hits, orbs)) continue;
-        const end = hits.length > 0
-          ? tmp.set(...hits[hits.length - 1].pos).add(
-            forward.clone().multiplyScalar(40),
-          )
-          : tmp.copy(eye).add(forward.clone().multiplyScalar(120));
-        fx.beam(muzzle, end, GOLD, 0.7, 0.45, 0.85);
-        fx.beam(muzzle, end, 0xffffff, 0.22, 0.3, 1);
-        fx.flash(muzzle, GOLD, 0.12, 0.2);
-        fx.ring(
-          muzzle.clone().add(forward.clone().multiplyScalar(1.5)),
-          GOLD,
-          0.2,
-          2.2,
-          0.35,
-        );
-        for (let i = 0; i < 12; i++) {
-          fx.burst(tmp2.copy(muzzle).lerp(end, i / 12), GOLD, 8, {
-            speed: 4,
-            size: 0.2,
-            life: 0.5,
-            gravity: 0,
-          });
-        }
-        gun.kick(GOLD, 1);
-        addTrauma(0.35);
-        fovKick = Math.max(fovKick, 5);
-        aberration = Math.max(aberration, 0.012);
-        sound.cannon();
-      } else {
-        // An orb in the sights takes the round: it is the thing about to hurt.
-        const orb = pickOrb();
-        const hit = orb === null ? pickTarget() : null;
-        if (orb !== null ? !game.shootOrb(orb) : !game.fire(cmd, hit)) continue;
-        const color = SHOT_COLORS[cmd];
-        const end = orb !== null
-          ? tmp.set(...orb.pos)
-          : hit
-          ? tmp.set(...hit.pos)
-          : tmp.copy(eye).add(forward.clone().multiplyScalar(80));
-        fx.beam(muzzle, end, color, 0.12, 0.14, 1);
-        fx.flash(muzzle, color, 0.06, 0.1);
-        fx.burst(muzzle, color, 6, {
-          speed: 3,
-          size: 0.06,
-          life: 0.2,
-          dir: forward,
-          gravity: 0,
-        });
-        gun.kick(color, 0.35);
-        addTrauma(0.04);
-        sound.shot(cmd);
-      }
+      if (cmd === "cannon") cannon();
+      else shoot(cmd, game.aim);
     }
 
     game.update(dt);
@@ -787,135 +715,55 @@ export function start(host: HTMLElement): () => void {
     // quietly. Kills and breaches take theirs out above, with their fireworks.
     if (views.size !== game.enemies.length) {
       const live = new Set(game.enemies.map((e) => e.id));
-      for (const [id, view] of views) {
-        if (live.has(id)) continue;
-        scene.remove(view.frame);
-        view.dispose();
-        views.delete(id);
-      }
+      for (const id of [...views.keys()]) if (!live.has(id)) removeView(id);
     }
-    for (const view of views.values()) view.update(dt, eye, clock);
+
+    const current = game.aim;
+    for (const view of views.values()) {
+      const e = view.enemy;
+      view.setAim(
+        current !== null && current.enemy === e
+          ? { spot: current.spot, reachable: current.reachable }
+          : null,
+      );
+      const key = `${game.hintLevel}:${e.state}`;
+      if (hinted.get(e.id) !== key) {
+        hinted.set(e.id, key);
+        view.setHint(game.hintFor(e), game.axisFor(e));
+      }
+      view.update(dt, turretAt, clock);
+    }
+
+    // The turret turns to what it would hit.
+    if (current !== null) turret.face(spotWorld(current, tmp));
+    else if (game.enemies.length > 0) {
+      const near = [...game.enemies].sort((a, b) =>
+        dist2(a.pos) - dist2(b.pos)
+      )[0];
+      turret.face(tmp.set(...near.pos));
+    }
+    turret.update(real, game.cannonCooldown <= 0, clock);
+
     fx.update(dt);
     stage.update(clock, pulse);
-    pulse = Math.min(1, pulse + real * 0.6);
-    gun.update(real, game.selected, game.cannonCooldown <= 0, clock);
+    pulse = Math.min(1, pulse + real * 0.9);
 
     // Shake: trauma squared, driven by smooth waves rather than noise, decaying on its own.
-    trauma = Math.max(0, trauma - real * 1.5);
-    shakeT += real * 28;
+    trauma = Math.max(0, trauma - real * 1.8);
+    shakeT += real * 26;
     const shake = trauma * trauma;
-    euler.set(
-      pitch + shake * 0.045 * Math.sin(shakeT * 1.3),
-      yaw + shake * 0.055 * Math.sin(shakeT * 1.7 + 1),
-      shake * 0.07 * Math.sin(shakeT * 0.9 + 2),
-    );
-    camera.quaternion.setFromEuler(euler);
     camera.position.set(
-      EYE[0] + shake * 0.1 * Math.sin(shakeT * 2.1),
-      EYE[1] + shake * 0.1 * Math.sin(shakeT * 2.7),
-      EYE[2],
+      basePos.x + shake * 0.5 * Math.sin(shakeT * 1.7),
+      basePos.y + shake * 0.4 * Math.sin(shakeT * 2.3 + 1),
+      basePos.z,
     );
 
-    fovKick *= Math.exp(-real * 7);
-    const fov = BASE_FOV + (camera.aspect < 1 ? 14 : 0) + fovKick;
-    if (Math.abs(camera.fov - fov) > 0.01) {
-      camera.fov = fov;
-      camera.updateProjectionMatrix();
-    }
-    aberration *= Math.exp(-real * 5);
-    flash *= Math.exp(-real * 7);
-    damage *= Math.exp(-real * 2.2);
-    grade.uniforms.uAberration.value = aberration;
+    flash *= Math.exp(-real * 8);
+    damage *= Math.exp(-real * 2.5);
     grade.uniforms.uFlash.value = flash;
     grade.uniforms.uDamage.value = damage;
-    grade.uniforms.uTime.value = clock;
 
-    drawOverlay(target);
     composer.render();
-  };
-
-  // The brackets round the target, and the arrows at the edges pointing at what is off screen.
-  const arrows = new Map<number, HTMLElement>();
-  const drawOverlay = (target: Enemy | null) => {
-    const w = host.clientWidth;
-    const h = host.clientHeight;
-    if (target !== null) {
-      tmp.set(...target.pos).project(camera);
-      const dist = tmp2.set(...target.pos).distanceTo(eye);
-      const px =
-        (target.radius / (dist * Math.tan((camera.fov * Math.PI) / 360))) *
-        (h / 2) * 1.25;
-      const size = Math.max(36, px * 2);
-      brackets.style.display = "block";
-      brackets.style.width = `${size}px`;
-      brackets.style.height = `${size}px`;
-      brackets.style.transform = `translate(${
-        (tmp.x * 0.5 + 0.5) * w - size / 2
-      }px, ${(-tmp.y * 0.5 + 0.5) * h - size / 2}px)`;
-      brackets.style.color = target.state === 0
-        ? GOLD
-        : SPECIES_COLORS[target.species.id];
-      brackets.classList.toggle("gs-home", target.state === 0);
-    } else {
-      brackets.style.display = "none";
-    }
-
-    const seen = new Set<number>();
-    const marks = [
-      ...game.enemies.map((enemy) => {
-        const danger = 1 -
-          Math.min(1, Math.hypot(enemy.pos[0], enemy.pos[2]) / 30);
-        return {
-          id: enemy.id,
-          pos: enemy.pos,
-          color: danger > 0.6 ? DANGER : SPECIES_COLORS[enemy.species.id],
-          danger,
-          blink: danger > 0.6,
-        };
-      }),
-      // An orb from behind would be a hit the player never had a chance at, so every one gets
-      // an arrow, red and blinking.
-      ...game.orbs.map((orb) => ({
-        id: orb.id,
-        pos: orb.pos,
-        color: DANGER,
-        danger: 0.6,
-        blink: true,
-      })),
-    ];
-    for (const mark of marks) {
-      tmp.set(...mark.pos).project(camera);
-      const onScreen = tmp.z < 1 && Math.abs(tmp.x) < 0.95 &&
-        Math.abs(tmp.y) < 0.92;
-      if (onScreen) continue;
-      seen.add(mark.id);
-      let el = arrows.get(mark.id);
-      if (!el) {
-        el = document.createElement("div");
-        el.className = "gs-arrow";
-        overlay.append(el);
-        arrows.set(mark.id, el);
-      }
-      // Direction on screen: from the position in camera space.
-      tmp2.set(...mark.pos).applyMatrix4(camera.matrixWorldInverse);
-      const ang = Math.atan2(-tmp2.y, tmp2.x);
-      const r = Math.min(w, h) * 0.42;
-      const x = w / 2 +
-        Math.cos(ang) * Math.min(r * (w / Math.min(w, h)), w / 2 - 28);
-      const y = h / 2 +
-        Math.sin(ang) * Math.min(r * (h / Math.min(w, h)), h / 2 - 28);
-      el.style.transform = `translate(${x}px, ${y}px) rotate(${ang}rad) scale(${
-        0.8 + mark.danger * 0.6
-      })`;
-      el.style.color = mark.color;
-      el.classList.toggle("gs-danger", mark.blink);
-    }
-    for (const [id, el] of arrows) {
-      if (!seen.has(id)) {
-        el.remove();
-        arrows.delete(id);
-      }
-    }
   };
 
   requestAnimationFrame(frame);
@@ -923,171 +771,138 @@ export function start(host: HTMLElement): () => void {
   return () => {
     running = false;
     observer.disconnect();
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mousedown", onMouseDown);
+    host.removeEventListener("pointermove", onPointerMove);
+    host.removeEventListener("pointerdown", onPointerDown);
+    host.removeEventListener("contextmenu", onContext);
     document.removeEventListener("keydown", onKey);
-    document.removeEventListener("pointerlockchange", onLockChange);
     document.removeEventListener("visibilitychange", onVisibility);
     for (const view of views.values()) view.dispose();
     composer.dispose();
+    target.dispose();
     renderer.dispose();
     renderer.domElement.remove();
     overlay.remove();
   };
 }
 
-/**
- * Asks for the mouse. A browser may say no — an iframe without the permission, a user who pressed
- * Escape a moment ago — and that is not an error, just a player who aims by dragging instead.
- *
- * @param el What to capture it for
- */
-export function lockPointer(el: HTMLElement): void {
-  try {
-    const p = el.requestPointerLock?.() as Promise<void> | undefined;
-    p?.catch?.(() => {});
-  } catch { /* not supported */ }
-}
-
 function dist2(p: readonly number[]): number {
-  return (p[0] - EYE[0]) ** 2 + (p[1] - EYE[1]) ** 2 + (p[2] - EYE[2]) ** 2;
-}
-
-function wrapAngle(a: number): number {
-  return Math.atan2(Math.sin(a), Math.cos(a));
-}
-
-/** A soft round glow, for halos and the gun's charge. */
-function glowTexture(): THREE.Texture {
-  const size = 128;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const g = ctx.createRadialGradient(
-    size / 2,
-    size / 2,
-    0,
-    size / 2,
-    size / 2,
-    size / 2,
-  );
-  g.addColorStop(0, "rgba(255,255,255,1)");
-  g.addColorStop(0.25, "rgba(255,255,255,0.55)");
-  g.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  return new THREE.CanvasTexture(canvas);
+  return (p[0] - TURRET[0]) ** 2 + (p[1] - TURRET[1]) ** 2 +
+    (p[2] - TURRET[2]) ** 2;
 }
 
 /**
- * The gun in the corner of the screen: three barrels, one per round, the selected one on top.
- *
- * It is scenery that answers back — it turns its barrels when the round changes, kicks when it
- * fires, glows in the colour of what it just fired, and the e砲's charge sits at its tip as a gold
- * light that goes out while the e砲 recharges.
+ * The turret: a squat base on the floor, a head that turns to whatever the aim is on, and a
+ * barrel with the e砲's charge glowing at its tip.
  */
-function buildGun(camera: THREE.Camera, glow: THREE.Texture) {
+function buildTurret(scene: THREE.Scene) {
   const root = new THREE.Group();
-  root.position.set(0.3, -0.26, -0.6);
-  root.scale.setScalar(0.6);
-  camera.add(root);
+  root.scale.setScalar(0.75);
+  scene.add(root);
 
   const metal = new THREE.MeshStandardMaterial({
-    color: 0x241a3d,
-    metalness: 0.8,
-    roughness: 0.35,
+    color: 0x3a3150,
+    metalness: 0.6,
+    roughness: 0.4,
   });
-  const trim = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const trim = new THREE.MeshStandardMaterial({
+    color: 0xd8d2f0,
+    metalness: 0.2,
+    roughness: 0.5,
+  });
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.13, 0.42), metal);
-  body.position.set(0, 0, 0.05);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.1), metal);
-  grip.position.set(0, -0.14, 0.18);
-  grip.rotation.x = -0.35;
-  const stripe = new THREE.Mesh(
-    new THREE.BoxGeometry(0.162, 0.012, 0.26),
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.8, 2.2, 0.7, 24),
+    metal,
+  );
+  base.position.y = 0.35;
+  const band = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.85, 1.85, 0.12, 24),
     trim,
   );
-  stripe.position.set(0, 0.03, 0.05);
-  root.add(body, grip, stripe);
+  band.position.y = 0.72;
+  root.add(base, band);
 
-  const drum = new THREE.Group();
-  drum.position.set(0, 0.01, -0.2);
-  root.add(drum);
-  const shots: Shot[] = ["ccw", "cw", "flip"];
-  const barrels = shots.map((shot, i) => {
-    const a = (i / 3) * Math.PI * 2;
-    const barrel = new THREE.Group();
-    barrel.position.set(Math.sin(a) * 0.045, Math.cos(a) * 0.045, 0);
-    const tube = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.022, 0.026, 0.34, 10),
-      metal,
-    );
-    tube.rotation.x = Math.PI / 2;
-    const band = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.028, 0.028, 0.03, 10),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(SHOT_COLORS[shot]).multiplyScalar(2),
-        toneMapped: false,
-      }),
-    );
-    band.rotation.x = Math.PI / 2;
-    band.position.z = -0.12;
-    barrel.add(tube, band);
-    drum.add(barrel);
-    return { shot, angle: a };
-  });
+  const head = new THREE.Group();
+  head.position.y = TURRET[1] / 0.75;
+  root.add(head);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(1.05, 24, 14), metal);
+  dome.scale.y = 0.75;
+  head.add(dome);
+
+  const pitch = new THREE.Group();
+  head.add(pitch);
+  const barrel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.2, 0.26, 2.4, 14),
+    metal,
+  );
+  barrel.rotation.x = -Math.PI / 2;
+  barrel.position.z = -1.4;
+  const collar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.3, 0.3, 0.25, 14),
+    trim,
+  );
+  collar.rotation.x = -Math.PI / 2;
+  collar.position.z = -2.5;
+  pitch.add(barrel, collar);
 
   const muzzle = new THREE.Object3D();
-  muzzle.position.set(0, 0.05, -0.4);
-  root.add(muzzle);
+  muzzle.position.z = -2.7;
+  pitch.add(muzzle);
 
-  const charge = new THREE.Sprite(
-    new THREE.SpriteMaterial({
-      map: glow,
-      color: new THREE.Color(GOLD).multiplyScalar(2),
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      toneMapped: false,
-    }),
+  const chargeMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(GOLD).multiplyScalar(1.6),
+    toneMapped: false,
+    transparent: true,
+  });
+  const charge = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 12, 8),
+    chargeMat,
   );
-  charge.position.set(0, 0.01, -0.42);
-  root.add(charge);
+  charge.position.z = -2.75;
+  pitch.add(charge);
 
+  let yaw = 0;
+  let tilt = 0;
+  let wantYaw = 0;
+  let wantTilt = 0;
   let recoil = 0;
-  let spin = 0;
-  let heat = 0;
-  const heatColor = new THREE.Color();
+  const at = new THREE.Vector3();
 
   return {
     muzzle,
-    kick(color: string, amount: number) {
-      recoil = Math.min(1.4, recoil + amount);
-      heat = 1;
-      heatColor.set(color);
-    },
-    update(dt: number, selected: Shot, ready: boolean, time: number) {
-      const want = -barrels.find((b) => b.shot === selected)!.angle;
-      spin += wrapAngle(want - spin) * Math.min(1, dt * 14);
-      drum.rotation.z = spin;
-      recoil *= Math.exp(-dt * 14);
-      heat *= Math.exp(-dt * 6);
-      root.position.z = -0.6 + recoil * 0.06;
-      root.rotation.x = recoil * 0.12;
-      root.position.y = -0.26 + Math.sin(time * 1.6) * 0.006;
-      trim.color.set(0x7a6aa8).lerp(heatColor, heat).multiplyScalar(
-        1 + heat * 1.5,
+    /** Where the barrel points, as a unit vector. */
+    forward(out: THREE.Vector3): THREE.Vector3 {
+      return out.set(0, 0, -1).applyQuaternion(
+        pitch.getWorldQuaternion(new THREE.Quaternion()),
       );
-      const s = ready ? 0.16 + Math.sin(time * 8) * 0.02 : 0.04;
-      charge.scale.setScalar(s);
-      charge.material.opacity = ready ? 1 : 0.35;
+    },
+    /** Turns towards a point in the world. */
+    face(point: THREE.Vector3) {
+      head.getWorldPosition(at);
+      const dx = point.x - at.x;
+      const dy = point.y - at.y;
+      const dz = point.z - at.z;
+      wantYaw = Math.atan2(-dx, -dz);
+      wantTilt = Math.atan2(dy, Math.hypot(dx, dz));
+    },
+    kick(amount: number) {
+      recoil = Math.min(1.2, recoil + amount);
+    },
+    update(dt: number, ready: boolean, time: number) {
+      yaw += Math.atan2(Math.sin(wantYaw - yaw), Math.cos(wantYaw - yaw)) *
+        Math.min(1, dt * 14);
+      tilt += (wantTilt - tilt) * Math.min(1, dt * 14);
+      head.rotation.y = yaw;
+      pitch.rotation.x = tilt;
+      recoil *= Math.exp(-dt * 12);
+      pitch.position.z = recoil * 0.35;
+      charge.scale.setScalar(ready ? 1 + Math.sin(time * 8) * 0.12 : 0.35);
+      chargeMat.opacity = ready ? 1 : 0.4;
     },
   };
 }
 
-/** The overlay's own styles: the target brackets and the edge arrows. */
+/** The overlay's own styles. */
 function engineStyles(): void {
   if (document.getElementById("gs-engine-style")) return;
   const style = document.createElement("style");
@@ -1095,30 +910,6 @@ function engineStyles(): void {
   style.textContent = `
     .gs-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
     .gs-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-    .gs-brackets {
-      position: absolute; left: 0; top: 0; display: none;
-      background:
-        linear-gradient(currentColor, currentColor) top left / 14px 3px,
-        linear-gradient(currentColor, currentColor) top left / 3px 14px,
-        linear-gradient(currentColor, currentColor) top right / 14px 3px,
-        linear-gradient(currentColor, currentColor) top right / 3px 14px,
-        linear-gradient(currentColor, currentColor) bottom left / 14px 3px,
-        linear-gradient(currentColor, currentColor) bottom left / 3px 14px,
-        linear-gradient(currentColor, currentColor) bottom right / 14px 3px,
-        linear-gradient(currentColor, currentColor) bottom right / 3px 14px;
-      background-repeat: no-repeat;
-      filter: drop-shadow(0 0 6px currentColor);
-    }
-    .gs-brackets.gs-home { animation: gs-lock .45s ease-in-out infinite alternate; }
-    @keyframes gs-lock { to { filter: drop-shadow(0 0 14px currentColor) brightness(1.6); } }
-    .gs-arrow {
-      position: absolute; left: 0; top: 0; width: 0; height: 0; margin: -10px 0 0 -10px;
-      border-top: 10px solid transparent; border-bottom: 10px solid transparent;
-      border-left: 18px solid currentColor;
-      filter: drop-shadow(0 0 6px currentColor);
-    }
-    .gs-arrow.gs-danger { animation: gs-blink .25s steps(2) infinite; }
-    @keyframes gs-blink { 50% { opacity: .3; } }
   `;
   document.head.append(style);
 }

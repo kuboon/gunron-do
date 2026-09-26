@@ -5,17 +5,18 @@
  * and, once it is in a browser, hands it to `engine.ts` — loaded then and only then, so three.js is
  * never part of the page's first download, and never loaded on the server at all.
  *
- * What this island does draw is the HUD, from `game`: the score and lives across the top, the
- * crosshair, what the aim is on and what group it is, the buttons a phone fires with, and the
- * cards between rounds. It redraws when the game says something changed — a shot, a kill, a new
- * target — and not every frame; the engine's own overlay does the per-frame work.
+ * What this island does draw is the HUD, from `game`: the score and lives across the top, what
+ * the aim is on — the enemy, its group, how far from home, and the spot a round would land on —
+ * the buttons a phone fires with, and the cards between rounds. It redraws when the game says
+ * something changed — a shot, a kill, a new aim — and not every frame; the engine's own overlay
+ * does the per-frame work.
  */
 
 import { clientEntry, css, type Handle, on, ref } from "@remix-run/ui";
 
 import { refuseZoomGestures } from "../../gestures.ts";
 import { CANNON_COOLDOWN, game, MAX_LIFE } from "../game.ts";
-import { type Shot, SHOTS } from "../groups.ts";
+import { type Spin, SPINS, SPOT_NAMES } from "../groups.ts";
 import {
   DANGER,
   GOLD,
@@ -23,6 +24,7 @@ import {
   NIGHT,
   SHOT_COLORS,
   SHOT_GLYPHS,
+  SHOT_NAMES,
   SPECIES_COLORS,
 } from "../palette.ts";
 import { sound } from "../sound.ts";
@@ -82,42 +84,34 @@ export const GunArena = clientEntry(
         });
     }
 
-    /** Starts (or restarts) a run, capturing the mouse where there is one. */
+    /** Starts (or restarts, or resumes) a run. */
     function launch(): void {
       sound.unlock();
       if (game.phase === "paused") game.resume();
       else game.start();
-      if (!matchMedia("(pointer: coarse)").matches) {
-        if (host !== null) lockHost(host);
-      }
     }
 
-    function press(command: Shot | "cannon") {
+    function press(command: Spin | "cannon") {
       return on<HTMLElement>("pointerdown", (event) => {
         event.preventDefault();
         sound.unlock();
-        if (command !== "cannon") game.select(command);
         game.command(command);
       });
     }
 
     return () => {
-      const target = game.target;
-      const guidance = game.guidance;
-      const advice = guidance?.guide.advice ?? null;
-      // Which buttons the advice points at: the twists, the flip, or neither.
-      const suggested = (shot: Shot): boolean =>
-        guidance?.next != null
-          ? guidance.next === shot
-          : advice === "flip"
-          ? shot === "flip"
-          : advice === "twist" || advice === "upright"
-          ? shot !== "flip"
-          : false;
+      const aim = game.aim;
+      const enemy = aim?.enemy ?? null;
+      const spot = aim !== null ? enemy!.species.spots[aim.spot] : null;
+      const hint = enemy !== null ? game.hintFor(enemy) : null;
+      const left = enemy !== null ? enemy.species.depth[enemy.state] : 0;
       const playing = game.phase === "playing";
       const ready = game.cannonCooldown <= 0;
       const showBanner = playing && banner !== null &&
         Date.now() < banner.until;
+      const suggested = (spin: Spin): boolean =>
+        hint !== null && aim !== null && hint.spot === aim.spot &&
+        hint.spin === spin;
 
       return (
         <div mix={rootStyle}>
@@ -147,7 +141,7 @@ export const GunArena = clientEntry(
             )
             : null}
 
-          {/* The top bar: lives, score, combo, wave. */}
+          {/* The top bar: lives, score, wave. */}
           <div mix={topStyle}>
             <div mix={livesStyle} aria-label={`残り ${game.life}`}>
               {Array.from(
@@ -193,83 +187,57 @@ export const GunArena = clientEntry(
             )
             : null}
 
-          {/* The crosshair, gold when what it is on can be finished. */}
-          {playing
-            ? (
-              <div
-                mix={crossStyle}
-                style={{
-                  color: target === null
-                    ? INK.text
-                    : target.state === 0
-                    ? GOLD
-                    : SPECIES_COLORS[target.species.id],
-                }}
-              >
-                <span mix={dotStyle} />
-              </div>
-            )
-            : null}
-
-          {/* What the aim is on. */}
-          {playing && target !== null
+          {/* What the aim is on: the enemy, how far from home, and the spot a round would hit. */}
+          {playing && enemy !== null && spot !== null
             ? (
               <div mix={targetStyle}>
-                <div
-                  mix={targetNameStyle}
-                  style={{ color: SPECIES_COLORS[target.species.id] }}
-                >
-                  {target.species.label}
+                <div mix={targetHeadStyle}>
+                  <span
+                    mix={targetNameStyle}
+                    style={{ color: SPECIES_COLORS[enemy.species.id] }}
+                  >
+                    {enemy.species.label}
+                  </span>
                   <span mix={targetShapeStyle}>
-                    {target.species.shape}・位数 {target.species.order}
+                    {enemy.species.shape}・位数 {enemy.species.order}
+                    {enemy.boss ? `・のこり ${enemy.lives} 回` : ""}
+                  </span>
+                  <span
+                    mix={leftStyle}
+                    key={`left-${enemy.id}-${left}`}
+                    style={{ color: left === 0 ? GOLD : INK.text }}
+                  >
+                    {left === 0 ? "e" : `あと ${left} 発`}
                   </span>
                 </div>
-                {guidance !== null
-                  ? (
-                    <div
-                      mix={leftStyle}
-                      key={`left-${target.id}-${guidance.left}`}
-                      style={{ color: guidance.left === 0 ? GOLD : INK.text }}
-                    >
-                      {guidance.left === 0 ? "e" : `あと ${guidance.left} 手`}
-                    </div>
-                  )
-                  : null}
-                {advice === "home"
+                {left === 0
                   ? (
                     <div mix={[stateStyle, homeStyle]}>
                       e に戻った！ e砲 で撃て
                     </div>
                   )
-                  : advice === "upright"
-                  ? (
+                  : (
                     <div mix={stateStyle}>
-                      e が正面！ {glyph("ccw")}
-                      {glyph("cw")} で立てよう
+                      <b>{SPOT_NAMES[spot.kind]}</b>を通る軸で{" "}
+                      <b>{360 / spot.fold}°</b>
+                      <span mix={mutedStyle}>
+                        （{spot.fold} 回で 1 周・位数 {spot.fold}）
+                      </span>
+                      {aim!.reachable
+                        ? null
+                        : <b style={{ color: DANGER }}>・裏側には届かない</b>}
                     </div>
-                  )
-                  : advice === "flip"
-                  ? (
-                    <div mix={[stateStyle, flipNowStyle]}>
-                      針が緑の輪に！ {glyph("flip")} で e を手前へ
-                    </div>
-                  )
-                  : advice === "twist"
-                  ? (
-                    <div mix={stateStyle}>
-                      {glyph("ccw")}
-                      {glyph("cw")} で<b style={{ color: GOLD }}>金の針</b>を<b
-                        style={{ color: SHOT_COLORS.flip }}
-                      >
-                        緑の輪
-                      </b>へ
-                    </div>
-                  )
-                  : null}
-                {guidance !== null && guidance.next !== null
+                  )}
+                {left !== 0 && game.hintLevel === 2
                   ? (
                     <div mix={hintStyle}>
-                      次は {glyph(guidance.next)}
+                      光る輪を、その向きの弾で撃て
+                    </div>
+                  )
+                  : left !== 0 && game.hintLevel === 1
+                  ? (
+                    <div mix={hintStyle}>
+                      白い線がこの敵の回転軸。同じ軸で逆に回せば e
                     </div>
                   )
                   : null}
@@ -277,30 +245,27 @@ export const GunArena = clientEntry(
             )
             : null}
 
-          {/* The weapons: buttons on a phone, a key legend with a mouse. */}
+          {/* The weapons: the buttons a phone fires with, and a key legend with a mouse. */}
           {playing
             ? (
               <div mix={weaponsStyle}>
-                {SHOTS.map((shot) => (
+                {SPINS.map((spin) => (
                   <button
-                    key={shot}
+                    key={spin}
                     type="button"
                     mix={[
                       shotButtonStyle,
-                      suggested(shot) ? suggestedStyle : null,
-                      press(shot),
+                      suggested(spin) ? suggestedStyle : null,
+                      press(spin),
                     ]}
-                    aria-label={shotName(shot)}
-                    aria-pressed={game.selected === shot}
-                    style={{
-                      color: SHOT_COLORS[shot],
-                      borderColor: game.selected === shot
-                        ? SHOT_COLORS[shot]
-                        : undefined,
-                    }}
+                    aria-label={SHOT_NAMES[spin]}
+                    style={{ color: SHOT_COLORS[spin] }}
                   >
-                    <span mix={glyphStyle}>{SHOT_GLYPHS[shot]}</span>
-                    <kbd mix={kbdStyle}>{shotKey(shot)}</kbd>
+                    <span mix={glyphStyle}>{SHOT_GLYPHS[spin]}</span>
+                    <span mix={shotNameStyle}>{SHOT_NAMES[spin]}</span>
+                    <kbd mix={kbdStyle}>
+                      {spin === "ccw" ? "左クリック" : "右クリック"}
+                    </kbd>
                   </button>
                 ))}
                 <button
@@ -318,7 +283,7 @@ export const GunArena = clientEntry(
                     style={{ animationDuration: `${CANNON_COOLDOWN}s` }}
                   />
                   <span mix={cannonLabelStyle}>e砲</span>
-                  <kbd mix={kbdStyle}>右/Space</kbd>
+                  <kbd mix={kbdStyle}>Space</kbd>
                 </button>
               </div>
             )
@@ -349,29 +314,24 @@ export const GunArena = clientEntry(
               <div mix={panelStyle}>
                 <h1 mix={logoStyle}>群シューター</h1>
                 <p mix={leadStyle}>
-                  群の元を撃ち込んで敵を回せ。<b style={{ color: GOLD }}>e</b>
-                  {" "}
-                  の面がまっすぐこちらを向いたら、<b style={{ color: GOLD }}>
-                    e砲
-                  </b>{" "}
-                  でとどめ。
+                  敵を撃って回し、<b style={{ color: GOLD }}>e</b>{" "}
+                  の面を砲台へ向けて立たせたら{" "}
+                  <b style={{ color: GOLD }}>e砲</b> でとどめ。
                 </p>
                 <ul mix={howStyle}>
                   <li>
-                    <b style={{ color: GOLD }}>金の針</b>は e の面の向き。
-                    {glyph("ccw")}
-                    {glyph("cw")}{" "}
-                    で回すと、針先が<span style={{ color: SHOT_COLORS.flip }}>
-                      緑の点線
-                    </span>
-                    にそって回る
+                    <b>当てた場所が回転の軸</b>
+                    になる。面の真ん中・頂点・辺の真ん中のどこかで、その軸のまわりに
+                    ひとコマ回る
                   </li>
                   <li>
-                    針先が<b style={{ color: SHOT_COLORS.flip }}>緑の輪</b>
-                    に入ったら {glyph("flip")} で e の面が手前に来る。あとは
+                    弾は {glyph("ccw")} 左回し と {glyph("cw")}{" "}
+                    右回し（砲台から見た向き）。点線の枠が e の定位置
+                  </li>
+                  <li>
+                    どの敵も「ある軸のまわりの回転」。<b>同じ軸で逆に回せば</b>
                     {" "}
-                    {glyph("ccw")}
-                    {glyph("cw")} で立てて <b style={{ color: GOLD }}>e砲</b>
+                    e に戻る。それが逆元
                   </li>
                   <li>
                     e 以外に e砲 を当てると{" "}
@@ -379,11 +339,11 @@ export const GunArena = clientEntry(
                     してさらに回る。赤い弾は撃ち落とせ
                   </li>
                   <li mix={fineOnlyStyle}>
-                    マウスで狙う・左クリックで選んだ弾（ホイール/1〜3で選択）・Q
-                    ↺ / E ↻ / F ⇅・右クリックか Space で e砲
+                    マウスで場所を指す・左クリック ↺ / 右クリック ↻・Space で
+                    e砲・Esc で一時停止
                   </li>
                   <li mix={coarseOnlyStyle}>
-                    ドラッグで見回す・敵をタップでそちらを向く・下のボタンで撃つ
+                    敵の場所をタップで狙う・下のボタンで撃つ
                   </li>
                 </ul>
                 <button type="button" mix={[startStyle, on("click", launch)]}>
@@ -447,25 +407,9 @@ export const GunArena = clientEntry(
   },
 );
 
-/** The same as the engine's `lockPointer`, without importing the engine to get it. */
-function lockHost(el: HTMLElement): void {
-  try {
-    const p = el.requestPointerLock?.() as Promise<void> | undefined;
-    p?.catch?.(() => {});
-  } catch { /* not supported */ }
-}
-
 /** A round's glyph, in its colour. */
-function glyph(shot: Shot) {
-  return <b style={{ color: SHOT_COLORS[shot] }}>{SHOT_GLYPHS[shot]}</b>;
-}
-
-function shotName(shot: Shot): string {
-  return shot === "ccw" ? "左回し" : shot === "cw" ? "右回し" : "裏返し";
-}
-
-function shotKey(shot: Shot): string {
-  return shot === "ccw" ? "Q" : shot === "cw" ? "E" : "F";
+function glyph(spin: Spin) {
+  return <b style={{ color: SHOT_COLORS[spin] }}>{SHOT_GLYPHS[spin]}</b>;
 }
 
 // --- styles -----------------------------------------------------------------
@@ -489,7 +433,6 @@ const stageStyle = css({
   position: "absolute",
   inset: 0,
   touchAction: "none",
-  cursor: "crosshair",
 });
 
 const failStyle = css({
@@ -573,85 +516,44 @@ const comboStyle = css({
   },
 });
 
-const crossStyle = css({
-  position: "absolute",
-  left: "50%",
-  top: "50%",
-  width: "34px",
-  height: "34px",
-  margin: "-17px 0 0 -17px",
-  borderRadius: "50%",
-  border: "2px solid currentColor",
-  boxShadow: "0 0 10px currentColor, inset 0 0 6px currentColor",
-  pointerEvents: "none",
-  opacity: 0.9,
-  "&::before, &::after": {
-    content: '""',
-    position: "absolute",
-    background: "currentColor",
-  },
-  "&::before": {
-    left: "50%",
-    top: "-10px",
-    width: "2px",
-    height: "8px",
-    marginLeft: "-1px",
-  },
-  "&::after": {
-    top: "50%",
-    left: "-10px",
-    height: "2px",
-    width: "8px",
-    marginTop: "-1px",
-  },
-});
-const dotStyle = css({
-  position: "absolute",
-  left: "50%",
-  top: "50%",
-  width: "4px",
-  height: "4px",
-  margin: "-2px 0 0 -2px",
-  borderRadius: "50%",
-  background: "currentColor",
-});
-
 const targetStyle = css({
   position: "absolute",
-  left: "50%",
-  top: "calc(50% + 4.2rem)",
-  transform: "translateX(-50%)",
+  left: "max(0.8rem, env(safe-area-inset-left))",
+  bottom: "max(0.8rem, env(safe-area-inset-bottom))",
+  width: "min(calc(100vw - 19rem), 26rem)",
   display: "grid",
-  justifyItems: "center",
+  justifyItems: "start",
+  "@media (max-width: 40rem)": {
+    left: "50%",
+    transform: "translateX(-50%)",
+    width: "calc(100vw - 1.6rem)",
+    bottom: "calc(max(0.8rem, env(safe-area-inset-bottom)) + 5.6rem)",
+    justifyItems: "center",
+  },
   gap: "0.2rem",
+  padding: "0.45rem 0.8rem",
+  borderRadius: "0.8rem",
+  background: "rgba(10, 6, 20, 0.7)",
   pointerEvents: "none",
-  textShadow: "0 0 8px rgba(0,0,0,0.9)",
-  whiteSpace: "nowrap",
 });
-const targetNameStyle = css({
-  fontSize: "1.6rem",
-  fontWeight: 900,
+const targetHeadStyle = css({
   display: "flex",
   alignItems: "baseline",
-  gap: "0.5rem",
-  textShadow: "0 0 12px currentColor",
+  gap: "0.6rem",
+  flexWrap: "wrap",
 });
-const targetShapeStyle = css({
-  fontSize: "0.75rem",
-  fontWeight: 400,
-  color: INK.muted,
-  textShadow: "none",
-});
-const stateStyle = css({ fontSize: "0.85rem", color: INK.text });
+const targetNameStyle = css({ fontSize: "1.3rem", fontWeight: 900 });
+const targetShapeStyle = css({ fontSize: "0.75rem", color: INK.muted });
+const mutedStyle = css({ color: INK.muted, fontSize: "0.75rem" });
+const stateStyle = css({ fontSize: "0.9rem", color: INK.text });
 const homeStyle = css({
   color: GOLD,
   fontWeight: 900,
   fontSize: "1.05rem",
-  textShadow: `0 0 12px ${GOLD}`,
   animation: "gs-home-blink .4s ease-in-out infinite alternate",
   "@keyframes gs-home-blink": { to: { opacity: 0.55 } },
 });
-const hintStyle = css({ fontSize: "0.8rem", color: INK.muted });
+const hintStyle = css({ fontSize: "0.8rem", color: "#9dffb0" });
 
 const weaponsStyle = css({
   position: "absolute",
@@ -665,8 +567,9 @@ const weaponsStyle = css({
 const shotButtonStyle = css({
   display: "grid",
   justifyItems: "center",
-  width: "4rem",
-  height: "4rem",
+  alignContent: "center",
+  width: "4.6rem",
+  height: "4.6rem",
   borderRadius: "1rem",
   border: "2px solid rgba(255,255,255,0.18)",
   background: "rgba(10, 4, 24, 0.55)",
@@ -679,11 +582,8 @@ const shotButtonStyle = css({
   },
   "&:active": { transform: "scale(0.92)" },
 });
-const glyphStyle = css({
-  fontSize: "1.8rem",
-  lineHeight: 1.4,
-  textShadow: "0 0 10px currentColor",
-});
+const glyphStyle = css({ fontSize: "1.9rem", lineHeight: 1.1 });
+const shotNameStyle = css({ fontSize: "0.65rem", fontWeight: 700 });
 const kbdStyle = css({
   fontFamily: "inherit",
   fontSize: "0.6rem",
@@ -860,23 +760,15 @@ const clearTitleStyle = css({
 });
 
 const leftStyle = css({
-  fontSize: "1.9rem",
+  fontSize: "1.3rem",
   fontWeight: 900,
   lineHeight: 1.1,
   fontVariantNumeric: "tabular-nums",
-  textShadow: "0 0 12px currentColor",
   animation: "gs-left .3s cubic-bezier(.2,1.8,.4,1)",
   "@keyframes gs-left": {
     from: { transform: "scale(1.5)", opacity: 0.3 },
     to: { transform: "scale(1)", opacity: 1 },
   },
-});
-
-const flipNowStyle = css({
-  fontWeight: 900,
-  color: SHOT_COLORS.flip,
-  textShadow: `0 0 10px ${SHOT_COLORS.flip}`,
-  animation: "gs-home-blink .35s ease-in-out infinite alternate",
 });
 
 /** The button the advice points at: lit, and breathing, so the eye goes to it. */

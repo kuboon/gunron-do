@@ -5,7 +5,7 @@
  * here; the modules beside this file hold the rules and the island reads them.
  *
  * The shell is dropped (`chrome: "bare"`) and the page is exactly the viewport, because a
- * first-person game is the screen. `viewport-fit=cover` lets the arena run under the notch while
+ * game played over the whole field is the screen. `viewport-fit=cover` lets the arena run under the notch while
  * the HUD keeps to the safe area.
  */
 

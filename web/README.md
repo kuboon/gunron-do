@@ -141,12 +141,12 @@ web/
       page.tsx       # the screen: one island, the arena and its HUD
       quat.ts        # the rotation arithmetic the rules are decided on
       solids.ts      # the five enemy bodies, each set up in its home pose
-      groups.ts      # the groups the two shots generate, closed once at load
+      groups.ts      # each group, its axes and spots, and what a shot at each does
       game.ts        # waves, shots, the e砲, the score — and the one instance
-      engine.ts      # three.js: aim, input, post-processing, all the juice
+      engine.ts      # three.js: the camera, picking a spot, input, the juice
       enemy-view.ts  # one enemy's mesh, turned to the element it is in
       fx.ts          # sparks, shards, shockwaves, beams, popups
-      stage.ts       # the grid, the sun, the stars
+      stage.ts       # the floor, and the line round the turret
       sound.ts       # every sound, synthesised
       islands/
         gun-arena.tsx  # the arena's box, and the HUD over it
@@ -234,31 +234,48 @@ because `env(safe-area-inset-*)` reads `0px` until a page asks for
 
 ## 群シューター
 
-A first-person shooter where the targets are groups. Each enemy is a solid — a
-triangle or square plate, a tetrahedron, a cube, a dodecahedron — whose
-rotations form D₃, D₄, A₄, S₄ or A₅, and its state is one element of that group:
-the rotation from its home pose, the `e` face upright and facing the player. The
-gun fires two generators (and one's inverse): a twist about the axis pointing at
-the player, and a half turn about the axis under the front face's bottom edge.
-Bring an enemy to `e` and the e砲 finishes it; fire the e砲 at anything else and
-it bounces, knocking the enemy one more turn round.
+A shooter where the targets are groups. Each enemy is a solid — a triangle or
+square plate, a tetrahedron, a cube, a dodecahedron — whose rotations form D₃,
+D₄, A₄, S₄ or A₅, and its state is one element of that group: the rotation from
+its home pose, the `e` face upright and facing the turret. Bring an enemy to `e`
+and the e砲 finishes it; fire the e砲 at anything else and it bounces, knocking
+the enemy one more step round.
 
-What makes it playable rather than a guessing game is that the state can be read
-off the screen. Every rotation is "which face is at the front, and which way
-up", and a twist only moves faces round a ring at a fixed depth; only the flip
-moves one between rings. So a gold needle marks where the `e` face points (drawn
-through the body), a green ring marks the spot on its current ring from which ⇅
-lifts it highest, and a dashed green circle marks the path a twist moves the
-needle along: twist the needle into the ring, flip, repeat, twist upright.
-`guide()` in `groups.ts` works that out, and following it always reaches `e` —
-on D₃, D₄, A₄ and S₄ in exactly the optimal number of shots on average, on A₅ in
-4.87 against 4.63. The HUD adds the distance home after every shot and lights the
-button the advice points at.
+The shots are where they land. Every rotation of these solids is a turn about
+one axis, and every axis comes out through a face's middle, a corner, or an
+edge's middle. A round that hits one of those spots turns the enemy one step
+about the axis through it — `360° / k`, `k` being how many steps make a full
+turn — clockwise or anticlockwise as the turret sees it, by which button fired
+it. So undoing an enemy is its inverse: the same axis, the other way. Most
+elements are one step about some axis and go home in one shot; a half turn about
+a cube's face or two steps round a dodecahedron's take two. `groups.ts` works
+all of it out from the solid at load — the elements, the axes (from the elements
+themselves), the spots where they leave the surface and whether that is a face,
+an edge or a corner, a table of what each round at each spot does to each
+element, and every element's distance home. A spot is fixed to the body, so a
+shot multiplies on the right: `g · s`.
+
+The camera is above and behind the turret, so the side of an enemy the player
+sees is roughly the side its `e` face belongs on. A dashed outline marks where
+the `e` face goes. Picking is on the solid itself: a ray from the camera finds
+the point under the pointer, and it snaps to the nearest spot, corners and
+edges weighted so they are not slivers (and a plate's rim can be hit from near
+the edge of its face). Rounds only reach the turret's half of an enemy, which
+costs nothing: every axis has at least one end on that half, and both ways
+round are available from either end.
+
+The field teaches in three steps: on the first two waves every enemy shows the
+spot to hit and which way; on the next two it shows only the axis it is turned
+about; after that, nothing. The HUD always names the spot under the pointer —
+"頂点を通る軸で 120°（3 回で 1 周・位数 3）".
+
+Only the effects glow. The bloom pass is thresholded above white, and the
+enemies are lit, matte and never pushed past it, so the `e` on one — ink on a
+white face — stays legible through any explosion.
 
 The rules are plain numbers. `solids.ts` builds each body in its home pose,
-`groups.ts` closes the two shots under composition — so the elements, a table of
-what each shot does to each, and every element's distance from `e` are worked out
-once at load — and `game.ts` runs the waves on top. Nothing there touches three.js.
+`groups.ts` works out its group as above, and `game.ts` runs the waves on top.
+Nothing there touches three.js.
 
 `engine.ts` is the only module that does, and the island loads it with a dynamic
 `import()` once it is in a browser. That keeps three.js (most of a 600 KB chunk)

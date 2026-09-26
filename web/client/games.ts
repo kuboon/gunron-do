@@ -41,10 +41,10 @@ export const games: readonly Game[] = [
   {
     slug: "gun-shooter",
     title: "群シューター",
-    tagline: "群の元を撃ち込んで敵を回し、e に戻ったところへ e砲。",
+    tagline: "当てた場所が回転の軸。逆元で e に戻して e砲。",
     description:
-      "D₃・D₄・A₄・S₄・A₅ の立体が襲ってくる一人称シューティング。回転の弾を撃ち込んで" +
-      "敵を単位元 e の向きに戻し、e砲でとどめを刺す。群の元を、照準で覚える。",
+      "D₃・D₄・A₄・S₄・A₅ の立体が砲台に迫ってくるシューティング。面・頂点・辺のどこに当てるかで" +
+      "回転の軸が決まる。同じ軸で逆に回す、つまり逆元を撃って敵を単位元 e に戻し、e砲でとどめ。",
     href: routes.gunShooter.href(),
     rulesHref: routes.rules.href({ game: "gun-shooter" }),
   },
