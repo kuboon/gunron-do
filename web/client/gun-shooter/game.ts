@@ -42,8 +42,23 @@ export const BREACH_RADIUS = 4;
 /** Where the lane starts: enemies join it here, at the far end of the field. */
 export const LANE_START = -44;
 
+/** Half the lane's width: as wide as the biggest enemy on it, and a little more. */
+export const LANE_HALF = 10;
+
 /** How far to either side an enemy comes in from before it joins the lane. */
-export const ENTRY_SIDE = 17;
+export const ENTRY_SIDE = 34;
+
+/**
+ * How big each kind of enemy is: its radius. Big, since the one at the front is what the player
+ * reads and picks spots on; the lane has room for two or three of them at a time.
+ */
+const RADIUS: Readonly<Record<SpeciesId, number>> = {
+  D3: 9,
+  D4: 9,
+  A4: 9,
+  S4: 8.1,
+  A5: 10.5,
+};
 
 /** Seconds from appearing at the side to settling on the lane. */
 export const ENTRY_TIME = 2.6;
@@ -475,7 +490,9 @@ class Game {
       this.#spawnIn -= dt;
       const last = this.enemies[this.enemies.length - 1];
       const room = last === undefined ||
-        (last.entry >= 1 && last.pos[2] > LANE_START + last.radius + 4);
+        (last.entry >= 1 &&
+          last.pos[2] >
+            LANE_START + last.radius + RADIUS[this.#queue[0]] + 1.2);
       if (this.#spawnIn <= 0 && room) {
         this.#spawn(this.#queue.shift()!);
         this.#spawnIn = this.#current.gap;
@@ -509,7 +526,7 @@ class Game {
         z = Math.min(z, ahead.pos[2] - (ahead.radius + enemy.radius + 1.2));
       }
       enemy.pos = [0, enemy.pos[1], z];
-      if (ahead === null && -z < BREACH_RADIUS + enemy.radius * 0.5) {
+      if (ahead === null && -z - enemy.radius * 0.6 < BREACH_RADIUS) {
         enemy.alive = false;
         this.life -= enemy.boss ? 3 : 1;
         this.combo = 0;
@@ -697,7 +714,7 @@ class Game {
     const choices = atDepth(species, d);
     const state = choices[Math.floor(Math.random() * choices.length)];
 
-    const radius = boss ? 4.2 : id === "S4" ? 2.7 : 3;
+    const radius = RADIUS[id];
     // They come in from alternate sides, so no two in a row cross the same way.
     this.#side = this.#side === 1 ? -1 : 1;
     const enemy: Enemy = {
@@ -708,7 +725,7 @@ class Game {
       taken: 0,
       pos: [
         this.#side * ENTRY_SIDE,
-        radius + (boss ? 1.2 : 0.9),
+        radius + 0.9,
         LANE_START - 4,
       ],
       radius,

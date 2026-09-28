@@ -10,7 +10,7 @@
 
 import * as THREE from "three";
 
-import { BREACH_RADIUS, LANE_START } from "./game.ts";
+import { BREACH_RADIUS, LANE_HALF, LANE_START } from "./game.ts";
 import { DANGER } from "./palette.ts";
 
 /** The scenery, and what moves it. */
@@ -102,9 +102,6 @@ function gridFloor() {
   mesh.renderOrder = -5;
   return { mesh, material };
 }
-
-/** Half the lane's width. */
-const LANE_HALF = 3.4;
 
 /**
  * The lane: a straight strip from the far end of the field to the turret, edged on both sides,

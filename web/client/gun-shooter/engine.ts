@@ -32,6 +32,7 @@ import {
   type Enemy,
   game,
   type GameEvent,
+  LANE_HALF,
   LANE_START,
   TURRET,
 } from "./game.ts";
@@ -181,9 +182,11 @@ export function start(host: HTMLElement): () => void {
     camera.fov = portrait ? 52 : 42;
     camera.updateProjectionMatrix();
     const must = [
-      new THREE.Vector3(-6, 0, LANE_START - 4),
-      new THREE.Vector3(6, 0, LANE_START - 4),
-      new THREE.Vector3(0, 9, LANE_START - 4),
+      new THREE.Vector3(-LANE_HALF, 0, LANE_START),
+      new THREE.Vector3(LANE_HALF, 0, LANE_START),
+      new THREE.Vector3(0, 20, LANE_START),
+      // The front enemy's top as it reaches the turret: it is closest, and tallest on the screen.
+      new THREE.Vector3(0, 19, -10),
       new THREE.Vector3(0, 0, 2.5),
     ];
     const e = portrait ? ELEVATION.portrait : ELEVATION.landscape;
@@ -451,7 +454,7 @@ export function start(host: HTMLElement): () => void {
           tmp,
           SPECIES_COLORS[ev.enemy.species.id],
           0.5,
-          ev.enemy.radius * 2.5,
+          ev.enemy.radius * 1.2,
           0.5,
         );
         if (ev.enemy.boss) addTrauma(0.4);
