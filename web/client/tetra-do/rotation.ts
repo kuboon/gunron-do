@@ -265,6 +265,76 @@ export function reducedLength(ops: readonly Op[]): number {
 }
 
 /**
+ * Whether a stretch of trace is an answer on its own: the solid home, and at least
+ * {@link MIN_REDUCED_LENGTH} moves left once the cancelling pairs inside it are out.
+ */
+function isAnswer(stretch: readonly Op[]): boolean {
+  return reducedLength(stretch) >= MIN_REDUCED_LENGTH &&
+    isIdentity(compose(stretch));
+}
+
+/**
+ * Where each answer in a trace ends, as positions one past its last move.
+ *
+ * Taken greedily from the front: an answer ends at the first move that makes it one, and the next
+ * starts on the move after. Each stretch is judged on its own, so a closing is a clean cut — the
+ * `c` that ends `a b c` and the `c⁻¹` that begins the next answer are not a cancelling pair. They
+ * used to be, when the whole trace was reduced as one word, and then `a b c c⁻¹ b⁻¹ a⁻¹` — two
+ * answers, the `e` lit after the first — reduced to nothing and did not clear at all.
+ *
+ * @param ops The moves, in trace order
+ * @returns The end of every answer, in order
+ */
+function answerEnds(ops: readonly Op[]): number[] {
+  const ends: number[] = [];
+  let from = 0;
+  for (let k = 1; k <= ops.length; k++) {
+    if (isAnswer(ops.slice(from, k))) {
+      ends.push(k);
+      from = k;
+    }
+  }
+  return ends;
+}
+
+/**
+ * {@link freeReduction} with the trace cut at every answer: which moves are struck out, and how
+ * many are left.
+ *
+ * What the score, the pitch and the dimmed cells go by. Pairs cancel inside an answer, or inside
+ * the open stretch after the last one, and never across a closing — the same stretches that
+ * {@link MAX_OPEN} and the combo already count in.
+ *
+ * @param ops The moves, in trace order
+ * @returns One flag per move, and how many survived
+ */
+export function traceReduction(
+  ops: readonly Op[],
+): { cancelled: boolean[]; length: number } {
+  const cancelled: boolean[] = [];
+  let length = 0;
+  let from = 0;
+  for (const end of [...answerEnds(ops), ops.length]) {
+    if (end === from) continue;
+    const stretch = freeReduction(ops.slice(from, end));
+    cancelled.push(...stretch.cancelled);
+    length += stretch.length;
+    from = end;
+  }
+  return { cancelled, length };
+}
+
+/**
+ * How long a trace is once the moves that undo each other are struck out, answer by answer.
+ *
+ * @param ops The moves, in trace order
+ * @returns The length that scores
+ */
+export function traceLength(ops: readonly Op[]): number {
+  return traceReduction(ops).length;
+}
+
+/**
  * How far a trace may go without the solid coming home.
  *
  * The one rule that makes length mean anything. Without it, a long trace is free: the solid turns
@@ -374,14 +444,12 @@ export interface Overrun {
 function overrunOf(ops: readonly Op[]): Overrun | null {
   let from = 0;
   for (let j = 0; j < ops.length; j++) {
-    const prefix = ops.slice(0, j + 1);
-    if (
-      reducedLength(prefix) >= MIN_REDUCED_LENGTH && isIdentity(compose(prefix))
-    ) {
+    const stretch = ops.slice(from, j + 1);
+    if (isAnswer(stretch)) {
       from = j + 1;
       continue;
     }
-    if (reducedLength(ops.slice(from, j + 1)) >= MAX_OPEN) {
+    if (reducedLength(stretch) >= MAX_OPEN) {
       return { from, to: j };
     }
   }
@@ -392,8 +460,10 @@ function overrunOf(ops: readonly Op[]): Overrun | null {
  * How a trace stands as a chain of closings.
  *
  * Home means what it means everywhere else in the game: the solid is back *and* enough of the
- * trace survived the free reduction to be an answer. So `a a⁻¹` is not a place to start counting
- * again from, which is the same thing the board says by drawing that pair dim.
+ * stretch since the last closing survived the free reduction to be an answer. So `a a⁻¹` is not a
+ * place to start counting again from, which is the same thing the board says by drawing that pair
+ * dim. Each stretch is reduced on its own, so nothing cancels across a closing — see
+ * {@link answerEnds}.
  *
  * The allowance is spent in moves that survive the free reduction, not in cells. A cancelling
  * pair turns the solid and turns it back, so it costs the player two cells and the clock the time
@@ -411,28 +481,17 @@ function overrunOf(ops: readonly Op[]): Overrun | null {
  * @returns Where the last closing was, and whether the chain is already spoiled
  */
 export function chain(ops: readonly Op[]): Chain {
-  let last = 0;
-  let closings = 0;
-
-  for (let k = MIN_REDUCED_LENGTH; k <= ops.length; k++) {
-    const prefix = ops.slice(0, k);
-    if (
-      reducedLength(prefix) < MIN_REDUCED_LENGTH || !isIdentity(compose(prefix))
-    ) {
-      continue;
-    }
-    // A stretch is worth what survives the reduction, and it costs the same thing: one measure
-    // for both. Going over the allowance is not checked here — a stretch cannot close one over
-    // without having stood at the limit, open, a move earlier, and `overrunOf` catches that.
-    if (reducedLength(ops.slice(last, k)) >= MIN_REDUCED_LENGTH) closings += 1;
-    last = k;
-  }
+  // A stretch is worth what survives the reduction, and it costs the same thing: one measure for
+  // both. Going over the allowance is not checked here — a stretch cannot close one over without
+  // having stood at the limit, open, a move earlier, and `overrunOf` catches that.
+  const ends = answerEnds(ops);
+  const last = ends.at(-1) ?? 0;
 
   const overrun = overrunOf(ops);
   return {
     since: reducedLength(ops.slice(last)),
     broken: overrun !== null,
-    closings,
+    closings: ends.length,
     overrun,
   };
 }

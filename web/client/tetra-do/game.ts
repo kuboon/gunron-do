@@ -29,8 +29,8 @@ import {
   opInverse,
   type Overrun,
   type Quat,
-  reducedLength,
   slerp,
+  traceLength,
 } from "./rotation.ts";
 import { type Move, TICK_MS } from "./record.ts";
 import { sound } from "./sound.ts";
@@ -747,7 +747,7 @@ export class TetraDo {
 
     if (this.#path.length >= 2 && index === this.#path[this.#path.length - 2]) {
       this.#path.pop();
-      this.#noises.back(reducedLength(this.word));
+      this.#noises.back(traceLength(this.word));
       this.#turn(opInverse(this.#cells[last].op), TURN_MS);
       this.#emit();
       return;
@@ -773,7 +773,7 @@ export class TetraDo {
     // worth nothing from here on, so it stops climbing — the same thing the dimmed line says, in
     // the ear rather than the eye.
     this.#noises.step(
-      this.broken ? 0 : Math.max(0, reducedLength(this.word) - 1),
+      this.broken ? 0 : Math.max(0, traceLength(this.word) - 1),
     );
     this.#turn(this.#cells[index].op, TURN_MS);
     this.#emit();
@@ -812,7 +812,7 @@ export class TetraDo {
       return;
     }
 
-    const reduced = reducedLength(word);
+    const reduced = traceLength(word);
 
     // Nothing but cancellations: `a a⁻¹ b b⁻¹`, or more pairs in a row. It comes home because it
     // never went anywhere, so it is not an answer and counts as nothing — but it is allowed to
