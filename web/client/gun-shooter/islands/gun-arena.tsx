@@ -6,8 +6,8 @@
  * never part of the page's first download, and never loaded on the server at all.
  *
  * What this island does draw is the HUD, from `game`: the score and lives across the top, what
- * the aim is on — the enemy, its group, how far from home, and the spot a round would land on —
- * the buttons a phone fires with, and the cards between rounds. It redraws when the game says
+ * the aim is on — the enemy at the front of the lane, its group, how far from home, and the spot
+ * the joystick is on — the buttons that fire, and the cards between rounds. It redraws when the game says
  * something changed — a shot, a kill, a new aim — and not every frame; the engine's own overlay
  * does the per-frame work.
  */
@@ -223,9 +223,6 @@ export const GunArena = clientEntry(
                       <span mix={mutedStyle}>
                         （{spot.fold} 回で 1 周・位数 {spot.fold}）
                       </span>
-                      {aim!.reachable
-                        ? null
-                        : <b style={{ color: DANGER }}>・裏側には届かない</b>}
                     </div>
                   )}
                 {left !== 0 && game.hintLevel === 2
@@ -263,9 +260,7 @@ export const GunArena = clientEntry(
                   >
                     <span mix={glyphStyle}>{SHOT_GLYPHS[spin]}</span>
                     <span mix={shotNameStyle}>{SHOT_NAMES[spin]}</span>
-                    <kbd mix={kbdStyle}>
-                      {spin === "ccw" ? "左クリック" : "右クリック"}
-                    </kbd>
+                    <kbd mix={kbdStyle}>{spin === "ccw" ? "J" : "K"}</kbd>
                   </button>
                 ))}
                 <button
@@ -283,7 +278,7 @@ export const GunArena = clientEntry(
                     style={{ animationDuration: `${CANNON_COOLDOWN}s` }}
                   />
                   <span mix={cannonLabelStyle}>e砲</span>
-                  <kbd mix={kbdStyle}>Space</kbd>
+                  <kbd mix={kbdStyle}>L・Space</kbd>
                 </button>
               </div>
             )
@@ -320,13 +315,19 @@ export const GunArena = clientEntry(
                 </p>
                 <ul mix={howStyle}>
                   <li>
-                    <b>当てた場所が回転の軸</b>
-                    になる。面の真ん中・頂点・辺の真ん中のどこかで、その軸のまわりに
-                    ひとコマ回る
+                    敵は中央のレーンを 1 列でやってくる。撃てるのは<b>
+                      先頭の 1 体
+                    </b>だけ
+                  </li>
+                  <li>
+                    ジョイスティックで先頭の敵の
+                    <b>面の真ん中・頂点・辺の真ん中</b>
+                    を選ぶ。そこを通る軸のまわりに、弾がひとコマ回す
                   </li>
                   <li>
                     弾は {glyph("ccw")} 左回し と {glyph("cw")}{" "}
-                    右回し（砲台から見た向き）。点線の枠が e の定位置
+                    右回し（砲台から見た向き）。点線の枠が e
+                    の定位置、面の矢印が e の方向
                   </li>
                   <li>
                     どの敵も「ある軸のまわりの回転」。<b>同じ軸で逆に回せば</b>
@@ -335,15 +336,14 @@ export const GunArena = clientEntry(
                   </li>
                   <li>
                     e 以外に e砲 を当てると{" "}
-                    <b style={{ color: DANGER }}>反発</b>
-                    してさらに回る。赤い弾は撃ち落とせ
+                    <b style={{ color: DANGER }}>反発</b>してさらに回る
                   </li>
                   <li mix={fineOnlyStyle}>
-                    マウスで場所を指す・左クリック ↺ / 右クリック ↻・Space で
-                    e砲・Esc で一時停止
+                    W A S D（またはマウス）で選ぶ・J で ↺ / K で ↻・L か Space
+                    で e砲・Esc で一時停止
                   </li>
                   <li mix={coarseOnlyStyle}>
-                    敵の場所をタップで狙う・下のボタンで撃つ
+                    左手のジョイスティックで選ぶ・右手のボタンで撃つ
                   </li>
                 </ul>
                 <button type="button" mix={[startStyle, on("click", launch)]}>
@@ -501,6 +501,7 @@ const muteStyle = css({
 const comboStyle = css({
   position: "absolute",
   top: "3.6rem",
+  "@media (max-width: 40rem)": { top: "9.5rem" },
   left: "50%",
   transform: "translateX(-50%)",
   fontSize: "1.3rem",
@@ -527,7 +528,8 @@ const targetStyle = css({
     left: "50%",
     transform: "translateX(-50%)",
     width: "calc(100vw - 1.6rem)",
-    bottom: "calc(max(0.8rem, env(safe-area-inset-bottom)) + 5.6rem)",
+    bottom: "auto",
+    top: "calc(max(0.6rem, env(safe-area-inset-top)) + 2.8rem)",
     justifyItems: "center",
   },
   gap: "0.2rem",

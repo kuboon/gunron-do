@@ -1,17 +1,16 @@
 /**
- * The screen: three.js, the pointer, and the juice.
+ * The screen: three.js, the joystick, and the juice.
  *
  * Loaded by the arena island only once it is in a browser, so neither the server nor the first
- * paint carries three.js. From then on it runs the frame: it turns the pointer into "this spot of
- * that enemy", hands shots at it to the rules in `game.ts`, and draws whatever the rules say
- * happened.
+ * paint carries three.js. From then on it runs the frame: it passes the joystick and the buttons on
+ * to the rules in `game.ts`, and draws whatever the rules say happened.
  *
- * The view is from above and behind the turret, looking out over the field, so every enemy is seen
- * from roughly the side that faces the turret — the side its `e` face belongs on. The pointer
- * works on the solid itself: a ray from the camera finds the face under it, and the face snaps it
- * to the nearest spot a round can land on (its middle, a corner, an edge's middle). With a mouse
- * that is hover and click — left for 左回し, right for 右回し, Space for the e砲. On a touch screen a
- * tap picks the spot and the buttons fire at it.
+ * The view is from above and behind the turret, looking down the lane the enemies come along, so
+ * the one at the front is seen from roughly the side that faces the turret — the side its `e` face
+ * belongs on. Only that one can be shot, and nothing is aimed by pointing: a joystick picks a spot
+ * on it (the middle of a face, a corner, the middle of an edge) and the buttons fire at that spot.
+ * On a phone the joystick is under the left thumb and the buttons under the right; at a keyboard it
+ * is W A S D (or the mouse, as a stick centred on the enemy), and J K L fire.
  *
  * The juice is scaled to how much an event matters and kept off the enemies themselves: a round
  * landing is a tracer, a few sparks and a thump; the `e` face coming home is a chime and a gold
@@ -26,17 +25,17 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 
-import { EnemyView, faceColors, spotAt } from "./enemy-view.ts";
+import { EnemyView, faceColors } from "./enemy-view.ts";
 import { Fx } from "./fx.ts";
 import {
   type Aim,
   type Enemy,
   game,
   type GameEvent,
-  type Orb,
+  LANE_START,
   TURRET,
 } from "./game.ts";
-import { reachable, type Spin } from "./groups.ts";
+import type { Spin } from "./groups.ts";
 import { DANGER, GOLD, NIGHT, SHOT_COLORS, SPECIES_COLORS } from "./palette.ts";
 import { sound } from "./sound.ts";
 import { buildStage } from "./stage.ts";
@@ -171,36 +170,49 @@ export function start(host: HTMLElement): () => void {
   // --- sizing -----------------------------------------------------------------------------------
 
   /**
-   * Backs the camera off until the whole field fits: the far edge where enemies come in, and the
-   * turret at the bottom. A portrait screen also narrows the field itself, so the enemies are not
-   * specks.
+   * Backs the camera off until the lane fits: its far end, where enemies join it, and the turret at
+   * the bottom. Enemies come in from the sides, from off the screen if it is narrow. A portrait
+   * screen keeps the far end below the top, where the HUD says what the front enemy is, and the
+   * turret above the bottom, where the thumbs are.
    */
   const fit = (w: number, h: number) => {
     const portrait = w < h;
-    game.fieldScale = portrait ? 0.55 : 1;
     camera.aspect = w / h;
     camera.fov = portrait ? 52 : 42;
     camera.updateProjectionMatrix();
-    const half = 18 * game.fieldScale + 3;
     const must = [
-      new THREE.Vector3(-half, 0, -44),
-      new THREE.Vector3(half, 0, -44),
-      new THREE.Vector3(0, 6, -46),
+      new THREE.Vector3(-6, 0, LANE_START - 4),
+      new THREE.Vector3(6, 0, LANE_START - 4),
+      new THREE.Vector3(0, 9, LANE_START - 4),
       new THREE.Vector3(0, 0, 2.5),
     ];
     const e = portrait ? ELEVATION.portrait : ELEVATION.landscape;
+    const top = portrait ? 0.5 : 0.9;
+    const bottom = portrait ? -0.62 : -0.92;
+    camera.clearViewOffset();
     const dir = new THREE.Vector3(0, Math.sin(e), Math.cos(e));
     const p = new THREE.Vector3();
+    let high = 0;
     for (let d = 12; d < 260; d += 0.5) {
       camera.position.copy(LOOK_AT).addScaledVector(dir, d);
       camera.lookAt(LOOK_AT);
       camera.updateMatrixWorld(true);
-      const ok = must.every((v) => {
+      let lo = Infinity;
+      let hi = -Infinity;
+      let wide = 0;
+      for (const v of must) {
         p.copy(v).project(camera);
-        return Math.abs(p.x) < 0.96 && p.y < 0.9 && p.y > -0.92;
-      });
-      if (ok) break;
+        lo = Math.min(lo, p.y);
+        hi = Math.max(hi, p.y);
+        wide = Math.max(wide, Math.abs(p.x));
+      }
+      high = hi;
+      if (wide < 0.96 && hi - lo <= top - bottom) break;
     }
+    // Then slide the picture down until the far end sits at the top limit: a window onto the view
+    // that starts above it, so nothing moves in the world and the perspective stays the same.
+    const shift = high - top;
+    if (shift > 0) camera.setViewOffset(w, h, 0, -shift * h / 2, w, h);
     basePos.copy(camera.position);
   };
 
@@ -217,57 +229,7 @@ export function start(host: HTMLElement): () => void {
   observer.observe(host);
   resize();
 
-  // --- picking -----------------------------------------------------------------------------------
-
-  const raycaster = new THREE.Raycaster();
-  const ndc = new THREE.Vector2();
-
-  /** What is under a point on the screen: an orb, or a spot of an enemy. */
-  const pickAt = (
-    clientX: number,
-    clientY: number,
-  ): { orb: Orb } | { aim: Aim } | null => {
-    const rect = host.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-
-    // An orb is small and quick, so it gets a generous circle on the screen.
-    let orb: Orb | null = null;
-    let orbD = coarse ? 40 : 28;
-    for (const o of game.orbs) {
-      tmp.set(...o.pos).project(camera);
-      const d = Math.hypot(
-        (tmp.x * 0.5 + 0.5) * rect.width - x,
-        (-tmp.y * 0.5 + 0.5) * rect.height - y,
-      );
-      if (d < orbD) {
-        orbD = d;
-        orb = o;
-      }
-    }
-    if (orb !== null) return { orb };
-
-    ndc.set((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
-    raycaster.setFromCamera(ndc, camera);
-    const meshes = [...views.values()].flatMap((v) => v.pickables);
-    for (const hit of raycaster.intersectObjects(meshes, false)) {
-      const view = hit.object.parent?.parent?.userData.view as
-        | EnemyView
-        | undefined;
-      if (!view || !view.enemy.alive) continue;
-      const local = view.body.worldToLocal(hit.point.clone());
-      const spot = spotAt(view.enemy, local);
-      const e = view.enemy;
-      return {
-        aim: {
-          enemy: e,
-          spot,
-          reachable: reachable(e.species, e.state, spot),
-        },
-      };
-    }
-    return null;
-  };
+  // --- aiming ------------------------------------------------------------------------------------
 
   /** Where a spot of an enemy is in the world right now. */
   const spotWorld = (aim: Aim, out: THREE.Vector3): THREE.Vector3 => {
@@ -282,8 +244,9 @@ export function start(host: HTMLElement): () => void {
 
   const muzzle = new THREE.Vector3();
 
-  const shoot = (spin: Spin, aim: Aim | null) => {
-    if (!game.fire(spin, aim)) return;
+  const shoot = (spin: Spin) => {
+    const aim = game.aim;
+    if (!game.fire(spin)) return;
     turret.muzzle.getWorldPosition(muzzle);
     const end = aim !== null
       ? spotWorld(aim, tmp)
@@ -295,46 +258,15 @@ export function start(host: HTMLElement): () => void {
     sound.shot(spin);
   };
 
-  const shootOrb = (orb: Orb) => {
-    if (!game.shootOrb(orb)) return;
-    turret.muzzle.getWorldPosition(muzzle);
-    fx.beam(muzzle, tmp.set(...orb.pos), 0xffffff, 0.06, 0.14, 1);
-    turret.kick(0.3);
-    sound.shot("cw");
-  };
-
-  /**
-   * The e砲, at what the aim is on — or, with nothing aimed at, at the nearest enemy that is
-   * home — straight through everything in line behind it.
-   */
+  /** The e砲, straight at the front of the lane. */
   const cannon = () => {
-    const aimed = game.aim?.enemy ??
-      game.enemies
-        .filter((e) => e.state === 0)
-        .sort((a, b) => dist2(a.pos) - dist2(b.pos))[0] ??
-      null;
+    const front = game.front;
     turret.muzzle.getWorldPosition(muzzle);
-    const dir = aimed !== null
-      ? tmp2.set(...aimed.pos).sub(muzzle).normalize()
+    const dir = front !== null
+      ? tmp2.set(...front.pos).sub(muzzle).normalize()
       : turret.forward(tmp2);
-    const along = (p: readonly number[]) => {
-      const v = tmp.set(p[0], p[1], p[2]).sub(muzzle);
-      const t = v.dot(dir);
-      return { t, off: v.addScaledVector(dir, -t).length() };
-    };
-    const hits = game.enemies
-      .map((e) => ({ e, ...along(e.pos) }))
-      .filter(({ e, t, off }) => t > 0 && off < e.radius * 0.95)
-      .sort((a, b) => a.t - b.t)
-      .map(({ e }) => e);
-    const orbs = game.orbs.filter((o) => {
-      const { t, off } = along(o.pos);
-      return t > 0 && off < 1.2;
-    });
-    if (!game.cannon(hits, orbs)) return;
-    const reach = hits.length > 0
-      ? Math.sqrt(dist2(hits[hits.length - 1].pos)) + 12
-      : 70;
+    if (!game.cannon()) return;
+    const reach = front !== null ? Math.sqrt(dist2(front.pos)) + 10 : 70;
     const end = muzzle.clone().addScaledVector(dir, reach);
     fx.beam(muzzle, end, GOLD, 0.45, 0.4, 0.9);
     fx.beam(muzzle, end, 0xffffff, 0.14, 0.26, 1);
@@ -347,41 +279,119 @@ export function start(host: HTMLElement): () => void {
 
   // --- input -------------------------------------------------------------------------------------
 
-  /** A pointer on the field. With a mouse the spot under it is always the aim. */
+  // The joystick a thumb drags: it appears where the thumb lands, on the left of the screen.
+  const stick = document.createElement("div");
+  stick.className = "gs-stick";
+  const knob = document.createElement("div");
+  knob.className = "gs-stick-knob";
+  stick.append(knob);
+  overlay.append(stick);
+  /** How far the knob goes, in pixels, at a full push. */
+  const STICK_REACH = 52;
+  let thumb: { id: number; x: number; y: number; moved: boolean } | null = null;
+
+  const restStick = () => {
+    stick.classList.remove("gs-stick-live");
+    stick.style.left = "";
+    stick.style.top = "";
+    knob.style.transform = "";
+  };
+
+  /** The mouse as a stick: its offset from the front enemy, over the enemy's size on the screen. */
+  const mouseStick = (clientX: number, clientY: number) => {
+    const front = game.front;
+    const view = front !== null ? views.get(front.id) : undefined;
+    if (!view || front === null) return;
+    const rect = host.getBoundingClientRect();
+    view.frame.getWorldPosition(tmp);
+    tmp2.copy(tmp).project(camera);
+    const cx = (tmp2.x * 0.5 + 0.5) * rect.width;
+    const cy = (-tmp2.y * 0.5 + 0.5) * rect.height;
+    tmp.addScaledVector(
+      tmp2.setFromMatrixColumn(camera.matrixWorld, 0),
+      front.radius,
+    ).project(camera);
+    const r = Math.max(
+      8,
+      Math.abs((tmp.x * 0.5 + 0.5) * rect.width - cx),
+    );
+    game.steer(
+      (clientX - rect.left - cx) / r,
+      -(clientY - rect.top - cy) / r,
+    );
+  };
+
   const onPointerMove = (e: PointerEvent) => {
-    if (e.pointerType !== "mouse" || game.phase !== "playing") return;
-    const pick = pickAt(e.clientX, e.clientY);
-    host.style.cursor = pick === null
-      ? "default"
-      : "aim" in pick && !pick.aim.reachable
-      ? "not-allowed"
-      : "pointer";
-    if (pick !== null && "aim" in pick) game.setAim(pick.aim);
+    if (game.phase !== "playing") return;
+    if (e.pointerType === "mouse") {
+      mouseStick(e.clientX, e.clientY);
+      return;
+    }
+    if (thumb === null || e.pointerId !== thumb.id) return;
+    let dx = e.clientX - thumb.x;
+    let dy = e.clientY - thumb.y;
+    const m = Math.hypot(dx, dy);
+    if (m > 8) thumb.moved = true;
+    if (m > STICK_REACH) {
+      dx *= STICK_REACH / m;
+      dy *= STICK_REACH / m;
+    }
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    if (thumb.moved) game.steer(dx / STICK_REACH, -dy / STICK_REACH);
   };
 
   const onPointerDown = (e: PointerEvent) => {
     if (game.phase !== "playing") return;
-    const pick = pickAt(e.clientX, e.clientY);
     if (e.pointerType === "mouse") {
       e.preventDefault();
-      if (e.button !== 0 && e.button !== 2) return;
-      if (pick !== null && "orb" in pick) {
-        shootOrb(pick.orb);
-        return;
-      }
-      const aim = pick !== null && "aim" in pick ? pick.aim : null;
-      if (aim !== null) game.setAim(aim);
-      shoot(e.button === 0 ? "ccw" : "cw", aim);
+      if (e.button === 0) shoot("ccw");
+      else if (e.button === 2) shoot("cw");
       return;
     }
-    // A finger picks; the buttons fire. An orb, though, is popped on the spot.
-    if (pick !== null && "orb" in pick) shootOrb(pick.orb);
-    else if (pick !== null) game.setAim(pick.aim);
+    // A thumb on the left half is the joystick, wherever it lands.
+    const rect = host.getBoundingClientRect();
+    if (thumb !== null || e.clientX - rect.left > rect.width * 0.55) return;
+    thumb = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    host.setPointerCapture(e.pointerId);
+    stick.classList.add("gs-stick-live");
+    stick.style.left = `${e.clientX - rect.left}px`;
+    stick.style.top = `${e.clientY - rect.top}px`;
+    knob.style.transform = "";
+  };
+
+  const onPointerUp = (e: PointerEvent) => {
+    if (thumb === null || e.pointerId !== thumb.id) return;
+    // Let go, the aim stays where the stick left it; a tap without a drag puts it back in the
+    // middle.
+    if (!thumb.moved) game.steer(0, 0);
+    thumb = null;
+    restStick();
+  };
+
+  /** The keyboard's stick: a step at a time. */
+  const STEPS: Record<string, readonly [number, number]> = {
+    w: [0, 1],
+    arrowup: [0, 1],
+    s: [0, -1],
+    arrowdown: [0, -1],
+    a: [-1, 0],
+    arrowleft: [-1, 0],
+    d: [1, 0],
+    arrowright: [1, 0],
   };
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key.toLowerCase();
+    const step = STEPS[k];
+    if (step !== undefined) {
+      if (game.phase === "playing") {
+        e.preventDefault();
+        game.nudge(step[0], step[1]);
+      }
+      return;
+    }
+    if (e.repeat) return;
     if (k === "m") {
       sound.toggle();
       game.notify();
@@ -393,12 +403,12 @@ export function start(host: HTMLElement): () => void {
       return;
     }
     if (game.phase !== "playing") return;
-    if (k === " ") {
+    if (k === " " || k === "l") {
       e.preventDefault();
       game.command("cannon");
-    } else if (k === "q" || k === "a") {
+    } else if (k === "j") {
       game.command("ccw");
-    } else if (k === "e" || k === "d") {
+    } else if (k === "k") {
       game.command("cw");
     }
   };
@@ -409,29 +419,11 @@ export function start(host: HTMLElement): () => void {
 
   host.addEventListener("pointermove", onPointerMove);
   host.addEventListener("pointerdown", onPointerDown);
+  host.addEventListener("pointerup", onPointerUp);
+  host.addEventListener("pointercancel", onPointerUp);
   host.addEventListener("contextmenu", onContext);
   document.addEventListener("keydown", onKey);
   document.addEventListener("visibilitychange", onVisibility);
-
-  // --- the orbs ----------------------------------------------------------------------------------
-
-  const orbViews = new Map<number, THREE.Group>();
-  const orbCore = new THREE.SphereGeometry(0.4, 16, 10);
-  const orbCage = new THREE.IcosahedronGeometry(0.75, 0);
-  const orbCoreMat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(DANGER).multiplyScalar(1.6),
-    toneMapped: false,
-  });
-  const orbCageMat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(0xff9a3d),
-    wireframe: true,
-  });
-  const removeOrb = (id: number) => {
-    const view = orbViews.get(id);
-    if (!view) return;
-    scene.remove(view);
-    orbViews.delete(id);
-  };
 
   // --- events ------------------------------------------------------------------------------------
 
@@ -465,11 +457,24 @@ export function start(host: HTMLElement): () => void {
         if (ev.enemy.boss) addTrauma(0.4);
         break;
       }
+      case "land": {
+        tmp.set(ev.enemy.pos[0], 0.1, ev.enemy.pos[2]);
+        fx.ring(
+          tmp,
+          SPECIES_COLORS[ev.enemy.species.id],
+          ev.enemy.radius * 0.5,
+          ev.enemy.radius * 1.8,
+          0.4,
+        );
+        addTrauma(ev.enemy.boss ? 0.35 : 0.08);
+        sound.hit();
+        break;
+      }
       case "turn": {
         const view = views.get(ev.enemy.id);
         const color = SHOT_COLORS[ev.spin];
         const at = spotWorld(
-          { enemy: ev.enemy, spot: ev.spot, reachable: true },
+          { enemy: ev.enemy, spot: ev.spot },
           new THREE.Vector3(),
         );
         view?.turn(ev.from, ev.to, color);
@@ -514,51 +519,12 @@ export function start(host: HTMLElement): () => void {
         break;
       }
       case "miss":
-        if (ev.what === "far") {
-          const aim = game.aim;
-          if (aim !== null) {
-            fx.popup(above(aim.enemy), "裏側には届かない", DANGER, "sm");
-          }
-        }
-        if (ev.what === "cannon" || ev.what === "far") sound.miss();
+        if (ev.what === "cannon") sound.miss();
         break;
-      case "orb": {
-        const view = new THREE.Group();
-        view.add(
-          new THREE.Mesh(orbCore, orbCoreMat),
-          new THREE.Mesh(orbCage, orbCageMat),
-        );
-        view.position.set(...ev.orb.pos);
-        orbViews.set(ev.orb.id, view);
-        scene.add(view);
-        fx.burst(tmp.set(...ev.orb.pos), 0xff9a3d, 10, {
-          speed: 4,
-          size: 0.16,
-          life: 0.35,
-        });
-        sound.enemyShot();
-        break;
-      }
-      case "pop": {
-        tmp.set(...ev.orb.pos);
-        fx.burst(tmp, 0xff9a3d, 30, { speed: 9, size: 0.2, life: 0.45 });
-        fx.ring(tmp, DANGER, 0.3, 2.4, 0.3);
-        fx.popup(tmp.clone(), `+${ev.points}`, "#ffb36b", "sm");
-        addTrauma(0.06);
-        sound.pop();
-        removeOrb(ev.orb.id);
-        break;
-      }
-      case "struck": {
-        removeOrb(ev.orb.id);
-        damage = 0.8;
-        addTrauma(0.6);
-        sound.breach();
-        break;
-      }
       case "cannon": {
         let big = false;
-        ev.kills.forEach((kill, i) => {
+        const kill = ev.kill;
+        if (kill !== null) {
           const e = kill.enemy;
           big ||= (e.boss && kill.broken) || e.species.order >= 24;
           tmp.set(...e.pos);
@@ -579,52 +545,45 @@ export function start(host: HTMLElement): () => void {
                 "md",
               );
             }
-          }, 60 + i * 90);
+          }, 60);
           if (!kill.broken) {
             fx.ring(tmp, GOLD, scale, scale * 3, 0.5);
             fx.burst(tmp, GOLD, 60, { speed: 10, size: 0.22, life: 0.6 });
-            return;
+          } else {
+            fx.flash(tmp, GOLD, scale * 1.4, 0.3);
+            fx.ring(
+              tmp.clone().setY(0.2),
+              GOLD,
+              scale,
+              scale * (e.boss ? 9 : 4.5),
+              0.6,
+            );
+            fx.shatter(
+              tmp,
+              faceColors(e.species),
+              e.boss ? 120 : 30 + e.species.order,
+              scale,
+              e.boss ? 14 : 10,
+            );
+            fx.burst(tmp, GOLD, e.boss ? 240 : 70, {
+              speed: e.boss ? 22 : 13,
+              size: 0.24,
+              life: 0.9,
+            });
+            removeView(e.id);
           }
-          fx.flash(tmp, GOLD, scale * 1.4, 0.3);
-          fx.ring(
-            tmp.clone().setY(0.2),
-            GOLD,
-            scale,
-            scale * (e.boss ? 9 : 4.5),
-            0.6,
-          );
-          fx.shatter(
-            tmp,
-            faceColors(e.species),
-            e.boss ? 120 : 30 + e.species.order,
-            scale,
-            e.boss ? 14 : 10,
-          );
-          fx.burst(tmp, GOLD, e.boss ? 240 : 70, {
-            speed: e.boss ? 22 : 13,
-            size: 0.24,
-            life: 0.9,
-          });
-          removeView(e.id);
-        });
-        if (ev.kills.length > 0) {
+        }
+        if (kill !== null) {
           hitStop = big ? 0.1 : 0.06;
-          slowmo = ev.kills.length > 1 || big ? 0.35 : 0.65;
+          slowmo = big ? 0.35 : 0.65;
           addTrauma(big ? 0.55 : 0.3);
           flash = reduced ? 0.04 : big ? 0.12 : 0.06;
           (grade.uniforms.uFlashColor.value as THREE.Color).set(0xfff1c0);
           pulse = 0;
           sound.explode(big);
-          if (ev.kills.length > 1) {
-            fx.popup(
-              above(ev.kills[0].enemy, 2.4),
-              `${ev.kills.length}連 e砲!!`,
-              "#ff8af1",
-              "xl",
-            );
-          }
         }
-        for (const e of ev.bounced) {
+        if (ev.bounced !== null) {
+          const e = ev.bounced;
           tmp.set(...e.pos);
           fx.burst(tmp, DANGER, 36, { speed: 10, size: 0.2, life: 0.5 });
           fx.ring(tmp, DANGER, e.radius, e.radius * 2.4, 0.35);
@@ -682,34 +641,13 @@ export function start(host: HTMLElement): () => void {
     if (game.phase !== "playing") dt = game.phase === "paused" ? 0 : real;
     clock += dt;
 
-    // The aim follows the enemy's state: a spot that was on the near side may not be after a turn.
-    const aim = game.aim;
-    if (aim !== null) {
-      if (!aim.enemy.alive) game.setAim(null);
-      else {
-        const r = reachable(aim.enemy.species, aim.enemy.state, aim.spot);
-        if (r !== aim.reachable) game.setAim({ ...aim, reachable: r });
-      }
-    }
-
     for (const cmd of game.takeCommands()) {
       if (cmd === "cannon") cannon();
-      else shoot(cmd, game.aim);
+      else shoot(cmd);
     }
 
     game.update(dt);
     for (const ev of game.drain()) handle(ev);
-
-    for (const orb of game.orbs) {
-      const view = orbViews.get(orb.id);
-      if (!view) continue;
-      view.position.set(...orb.pos);
-      view.rotation.set(clock * 3.1, clock * 4.3, 0);
-    }
-    if (orbViews.size !== game.orbs.length) {
-      const live = new Set(game.orbs.map((o) => o.id));
-      for (const id of [...orbViews.keys()]) if (!live.has(id)) removeOrb(id);
-    }
 
     // A view whose enemy the rules no longer have — a new run started over the old one — goes
     // quietly. Kills and breaches take theirs out above, with their fireworks.
@@ -718,30 +656,30 @@ export function start(host: HTMLElement): () => void {
       for (const id of [...views.keys()]) if (!live.has(id)) removeView(id);
     }
 
+    // Only the front of the lane shows the aim and the hints: nobody behind it can be shot yet.
     const current = game.aim;
+    const front = game.front;
     for (const view of views.values()) {
       const e = view.enemy;
+      const isFront = e === front;
       view.setAim(
-        current !== null && current.enemy === e
-          ? { spot: current.spot, reachable: current.reachable }
-          : null,
+        current !== null && current.enemy === e ? current.spot : null,
       );
-      const key = `${game.hintLevel}:${e.state}`;
+      const key = `${game.hintLevel}:${e.state}:${isFront}`;
       if (hinted.get(e.id) !== key) {
         hinted.set(e.id, key);
-        view.setHint(game.hintFor(e), game.axisFor(e));
+        view.setHint(
+          isFront ? game.hintFor(e) : null,
+          isFront ? game.axisFor(e) : null,
+        );
       }
       view.update(dt, turretAt, clock);
     }
 
     // The turret turns to what it would hit.
     if (current !== null) turret.face(spotWorld(current, tmp));
-    else if (game.enemies.length > 0) {
-      const near = [...game.enemies].sort((a, b) =>
-        dist2(a.pos) - dist2(b.pos)
-      )[0];
-      turret.face(tmp.set(...near.pos));
-    }
+    else if (front !== null) turret.face(tmp.set(...front.pos));
+    else turret.face(tmp.set(0, TURRET[1], LANE_START));
     turret.update(real, game.cannonCooldown <= 0, clock);
 
     fx.update(dt);
@@ -773,6 +711,8 @@ export function start(host: HTMLElement): () => void {
     observer.disconnect();
     host.removeEventListener("pointermove", onPointerMove);
     host.removeEventListener("pointerdown", onPointerDown);
+    host.removeEventListener("pointerup", onPointerUp);
+    host.removeEventListener("pointercancel", onPointerUp);
     host.removeEventListener("contextmenu", onContext);
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("visibilitychange", onVisibility);
@@ -910,6 +850,19 @@ function engineStyles(): void {
   style.textContent = `
     .gs-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
     .gs-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .gs-stick {
+      position: absolute; left: max(3.8rem, 15%); top: calc(100% - 5.4rem);
+      width: 6rem; height: 6rem; margin: -3rem 0 0 -3rem; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.18); background: rgba(10,4,24,0.35);
+      display: grid; place-items: center; opacity: 0.55; transition: opacity .15s;
+    }
+    .gs-stick-live { opacity: 1; transition: none; }
+    .gs-stick-knob {
+      width: 3rem; height: 3rem; border-radius: 50%;
+      background: rgba(255,255,255,0.28); border: 2px solid rgba(255,255,255,0.6);
+      box-shadow: 0 0 12px rgba(255,255,255,0.3);
+    }
+    @media (pointer: fine) { .gs-stick { display: none; } }
   `;
   document.head.append(style);
 }

@@ -2,15 +2,16 @@
  * 群シューター's rules, and the one game every island and the renderer share.
  *
  * Everything that decides anything is here, on plain numbers: where the enemies are, which element
- * each one is in, what a shot does, when a wave ends, the score. The renderer never decides — it
- * reads this, draws it, and turns the player's pointer into "this round at that spot of that
- * enemy". The HUD island never decides either; it reads this and shows it.
+ * each one is in, which spot of the front one the joystick is on, what a shot does, when a wave
+ * ends, the score. The renderer never decides — it reads this, draws it, and passes the player's
+ * stick and buttons on. The HUD island never decides either; it reads this and shows it.
  *
- * The turret stands at the origin and does not move. Enemies come across the field towards it,
- * each in a random element of its group. A round turns the enemy it hits one step about the axis
- * through the spot it hit (see `groups.ts`); once an enemy is at `e` — its `e` face upright and
- * facing the turret — the e砲 destroys it. The e砲 at anything else bounces off and knocks the
- * enemy one more step round. An enemy that reaches the turret costs a life.
+ * The turret stands at the origin and does not move. Enemies come down one lane towards it in single
+ * file, each in a random element of its group, and only the one at the front can be shot. The
+ * joystick picks a spot on it — the middle of a face, a corner, the middle of an edge — and a round
+ * turns it one step about the axis through that spot (see `groups.ts`). Once it is at `e` — its `e`
+ * face upright and facing the turret — the e砲 destroys it. The e砲 at anything else bounces off
+ * and knocks the enemy one more step round. An enemy that reaches the turret costs a life.
  *
  * What the renderer needs to animate comes out as events, drained once a frame: a shot landing is
  * one rotation from one element to another, and the renderer spins the mesh between the two. The
@@ -28,14 +29,24 @@ import {
   type SpeciesId,
   type Spin,
   SPINS,
+  spotDir,
 } from "./groups.ts";
 import type { Quat, Vec3 } from "./quat.ts";
 
-/** Where rounds leave the turret, and where enemy fire is aimed. */
+/** Where rounds leave the turret. */
 export const TURRET: Vec3 = [0, 1.6, 0];
 
 /** How close an enemy may come before it hits the turret. */
 export const BREACH_RADIUS = 4;
+
+/** Where the lane starts: enemies join it here, at the far end of the field. */
+export const LANE_START = -44;
+
+/** How far to either side an enemy comes in from before it joins the lane. */
+export const ENTRY_SIDE = 17;
+
+/** Seconds from appearing at the side to settling on the lane. */
+export const ENTRY_TIME = 2.6;
 
 /** How many hits the turret can take. */
 export const MAX_LIFE = 5;
@@ -49,6 +60,9 @@ export const CANNON_COOLDOWN = 0.7;
 /** How many times the boss has to be brought home and shot before it breaks. */
 const BOSS_LIVES = 3;
 
+/** How far a stick has to be pushed before it leaves the middle. */
+const DEAD_ZONE = 0.22;
+
 /** An enemy on the field. */
 export interface Enemy {
   id: number;
@@ -61,59 +75,43 @@ export interface Enemy {
   taken: number;
   /** Where it is. */
   pos: Vec3;
-  /** How big it is drawn, and how big a target it is. */
+  /** How big it is drawn. */
   radius: number;
-  /** Units per second towards the turret. */
+  /** Units per second down the lane. */
   speed: number;
-  /** The phase of its sideways drift. */
-  sway: number;
+  /**
+   * How far through coming in from the side it is, 0 to 1. Until it reaches 1 it is not on the
+   * lane: it tumbles, it cannot be shot, and it holds up nobody.
+   */
+  entry: number;
+  /** Which side it comes in from: -1 left, 1 right. */
+  side: -1 | 1;
   boss: boolean;
   /** How many more times it has to be finished. 1 for everything but the boss. */
   lives: number;
   alive: boolean;
-  /** Seconds until it next fires an orb, or `Infinity` in a wave where nobody does. */
-  fireIn: number;
 }
 
-/** An energy orb an enemy fired at the turret. Any round pops it. */
-export interface Orb {
-  id: number;
-  pos: Vec3;
-  /** Units per second. */
-  vel: Vec3;
-  alive: boolean;
-}
-
-/** What the pointer is on: an enemy, and the spot of it a round would land on. */
+/** What the stick is on: the enemy at the front of the lane, and a spot of it. */
 export interface Aim {
   enemy: Enemy;
-  /** An index into `enemy.species.spots`. */
+  /** An index into `enemy.species.spots`. Always one a round can reach. */
   spot: number;
-  /** Whether a round from the turret can get there. */
-  reachable: boolean;
 }
 
 /**
  * How much help the field gives, by wave.
  *
- * - `2`: every enemy shows the spot to hit and which way.
- * - `1`: every enemy shows the axis it is turned about; which end, and which way, is the player's.
+ * - `2`: the front enemy shows the spot to hit and which way.
+ * - `1`: it shows the axis it is turned about; which end, and which way, is the player's.
  * - `0`: nothing but the enemy.
  */
 export type HintLevel = 0 | 1 | 2;
 
-/** How close an orb gets before it hits. */
-const ORB_HIT_RADIUS = 1.8;
-
-/** How fast an orb flies. */
-const ORB_SPEED = 8;
-
-/** What popping one is worth. */
-const ORB_POINTS = 25;
-
 /** What the renderer is told happened. */
 export type GameEvent =
   | { type: "spawn"; enemy: Enemy }
+  | { type: "land"; enemy: Enemy }
   | {
     type: "turn";
     enemy: Enemy;
@@ -128,17 +126,14 @@ export type GameEvent =
     gain: number;
   }
   | { type: "scramble"; enemy: Enemy; from: Quat; to: Quat }
-  | { type: "orb"; orb: Orb; from: Enemy }
-  | { type: "pop"; orb: Orb; points: number }
-  | { type: "struck"; orb: Orb }
-  | { type: "miss"; what: Spin | "cannon" | "far" }
-  | { type: "cannon"; kills: Kill[]; bounced: Enemy[] }
+  | { type: "miss"; what: Spin | "cannon" }
+  | { type: "cannon"; kill: Kill | null; bounced: Enemy | null }
   | { type: "breach"; enemy: Enemy }
   | { type: "wave"; wave: number; title: string; boss: boolean }
   | { type: "clear"; wave: number }
   | { type: "over" };
 
-/** One enemy the e砲 finished, and what it was worth. */
+/** The enemy the e砲 finished, and what it was worth. */
 export interface Kill {
   enemy: Enemy;
   points: number;
@@ -147,12 +142,12 @@ export interface Kill {
   broken: boolean;
 }
 
-/** What a HUD button asked for, resolved against the aim when the frame gets to it. */
+/** What a button or key asked for, done when the frame gets to it. */
 export type Command = Spin | "cannon";
 
 export type Phase = "title" | "playing" | "paused" | "over";
 
-/** One wave: who comes, how far from home, how fast, and how spread out. */
+/** One wave: who comes, how far from home, how fast, and how often. */
 interface Wave {
   title: string;
   /** Kinds and counts, spawned in this order. */
@@ -160,13 +155,9 @@ interface Wave {
   /** How many shots from `e` each enemy starts: at least, at most. */
   depth: readonly [number, number];
   speed: number;
-  /** How far either side of the middle they come from. */
-  spread: number;
   /** Seconds between arrivals. */
   gap: number;
   boss?: boolean;
-  /** Seconds between each enemy's orbs, or nothing for a wave where they hold fire. */
-  orbs?: number;
 }
 
 const WAVES: readonly Wave[] = [
@@ -174,62 +165,50 @@ const WAVES: readonly Wave[] = [
     title: "D₃ 正三角形",
     spawns: [["D3", 4]],
     depth: [1, 1],
-    speed: 1.2,
-    spread: 9,
-    gap: 3,
+    speed: 1.3,
+    gap: 5,
   },
   {
     title: "D₄ 正方形",
     spawns: [["D4", 5]],
     depth: [1, 2],
-    speed: 1.25,
-    spread: 12,
-    gap: 2.6,
+    speed: 1.35,
+    gap: 4.6,
   },
   {
     title: "A₄ 正四面体",
     spawns: [["A4", 5]],
     depth: [1, 1],
-    speed: 1.3,
-    spread: 14,
-    gap: 2.6,
-    orbs: 9,
+    speed: 1.45,
+    gap: 4.4,
   },
   {
     title: "混成部隊",
     spawns: [["D3", 2], ["A4", 3], ["D4", 3]],
     depth: [1, 2],
-    speed: 1.4,
-    spread: 16,
-    gap: 2,
-    orbs: 8,
+    speed: 1.55,
+    gap: 3.8,
   },
   {
     title: "S₄ 立方体",
     spawns: [["S4", 5]],
     depth: [1, 2],
-    speed: 1.25,
-    spread: 15,
-    gap: 2.8,
-    orbs: 8,
+    speed: 1.4,
+    gap: 4.6,
   },
   {
     title: "総力戦",
     spawns: [["D4", 2], ["S4", 3], ["A4", 3], ["D3", 2]],
     depth: [1, 2],
-    speed: 1.45,
-    spread: 18,
-    gap: 1.7,
-    orbs: 6.5,
+    speed: 1.6,
+    gap: 3.4,
   },
   {
     title: "A₅ 正十二面体",
-    spawns: [["A5", 1], ["S4", 2], ["A4", 2]],
+    spawns: [["S4", 2], ["A4", 2], ["A5", 1]],
     depth: [2, 2],
-    speed: 0.75,
-    spread: 12,
-    gap: 3.2,
-    orbs: 5,
+    speed: 0.9,
+    gap: 4.4,
     boss: true,
   },
 ];
@@ -238,8 +217,8 @@ type Listener = () => void;
 
 class Game {
   phase: Phase = "title";
+  /** Everyone on the field, in the order they came: the lane's front first. */
   enemies: Enemy[] = [];
-  orbs: Orb[] = [];
   life = MAX_LIFE;
   score = 0;
   best = 0;
@@ -251,8 +230,14 @@ class Game {
   wave = 0;
   /** How many times round the list of waves. */
   lap = 0;
-  /** What the pointer is on, as the renderer last said. */
+  /** What the stick is on. */
   aim: Aim | null = null;
+  /**
+   * Where the stick points, in the front enemy's frame: `+Z` at the turret, `+X` to the player's
+   * right, `+Y` up. The aim is whichever reachable spot lies closest to it, so after a turn the
+   * stick stays where it was and the aim moves to whatever spot is there now.
+   */
+  cursor: Vec3 = [0, 0, 1];
   /** Seconds until the gun and the e砲 are ready. */
   shotCooldown = 0;
   cannonCooldown = 0;
@@ -260,11 +245,6 @@ class Game {
   time = 0;
   /** Between the last enemy of a wave and the first of the next. */
   clearing = false;
-  /**
-   * How wide the field is, as a share of the full width: the renderer narrows it on a portrait
-   * screen, so enemies come from where a tall phone can see them at a size it can read.
-   */
-  fieldScale = 1;
 
   #events: GameEvent[] = [];
   #commands: Command[] = [];
@@ -274,6 +254,7 @@ class Game {
   #spawnIn = 0;
   #breather = 0;
   #current: Wave = WAVES[0];
+  #side: -1 | 1 = 1;
 
   constructor() {
     try {
@@ -282,11 +263,16 @@ class Game {
     } catch { /* storage may be unavailable */ }
   }
 
+  /** The enemy at the front of the lane: the only one that can be shot. */
+  get front(): Enemy | null {
+    const e = this.enemies[0];
+    return e !== undefined && e.entry >= 1 ? e : null;
+  }
+
   /** Starts from wave one. */
   start(): void {
     this.phase = "playing";
     this.enemies = [];
-    this.orbs = [];
     this.life = MAX_LIFE;
     this.score = 0;
     this.combo = 0;
@@ -297,6 +283,7 @@ class Game {
     this.lap = 0;
     this.time = 0;
     this.aim = null;
+    this.cursor = [0, 0, 1];
     this.shotCooldown = 0;
     this.cannonCooldown = 0;
     this.#events = [];
@@ -317,7 +304,7 @@ class Game {
     this.#emit();
   }
 
-  /** A HUD button: fire at whatever the aim is on, once the frame gets to it. */
+  /** A button or key: fire, once the frame gets to it. */
   command(command: Command): void {
     if (this.phase === "playing") this.#commands.push(command);
   }
@@ -336,117 +323,135 @@ class Game {
     return out;
   }
 
-  /** The renderer saying what the pointer is on. */
-  setAim(aim: Aim | null): void {
-    const a = this.aim;
-    if (
-      a === aim ||
-      (a !== null && aim !== null && a.enemy === aim.enemy &&
-        a.spot === aim.spot && a.reachable === aim.reachable)
-    ) {
-      return;
+  /**
+   * An analogue stick: a finger's joystick, or the mouse. `(0, 0)` is the middle of the front
+   * enemy, as it faces the turret; a full push to the side is its rim.
+   *
+   * @param x Rightwards, -1 to 1
+   * @param y Upwards, -1 to 1
+   */
+  steer(x: number, y: number): void {
+    const m = Math.hypot(x, y);
+    if (m < DEAD_ZONE) {
+      this.cursor = [0, 0, 1];
+    } else {
+      const t = Math.min(1, (m - DEAD_ZONE) / (1 - DEAD_ZONE)) * Math.PI / 2;
+      this.cursor = [
+        Math.sin(t) * x / m,
+        Math.sin(t) * y / m,
+        Math.cos(t),
+      ];
     }
-    this.aim = aim;
-    this.#emit();
+    this.#retarget();
   }
 
   /**
-   * One round.
+   * A step of a digital stick: the keyboard. The aim moves to the nearest reachable spot that way,
+   * as the front enemy looks from the turret.
+   *
+   * @param dx -1 left, 1 right
+   * @param dy -1 down, 1 up
+   */
+  nudge(dx: number, dy: number): void {
+    const f = this.front;
+    if (f === null || this.aim === null) return;
+    const s = f.species;
+    const [px, py] = spotDir(s, f.state, this.aim.spot);
+    let best = -1;
+    let bestCost = Infinity;
+    s.spots.forEach((_, i) => {
+      if (i === this.aim!.spot || !reachable(s, f.state, i)) return;
+      const [qx, qy] = spotDir(s, f.state, i);
+      const vx = qx - px;
+      const vy = qy - py;
+      const along = vx * dx + vy * dy;
+      const off = Math.abs(vx * dy - vy * dx);
+      // Only spots that way, within a cone; the nearest along it, straightest first.
+      if (along < 0.05 || off > along * 1.2) return;
+      const cost = along + off * 2;
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = i;
+      }
+    });
+    if (best < 0) return;
+    this.cursor = spotDir(s, f.state, best);
+    this.#retarget();
+  }
+
+  /**
+   * One round, at the spot the stick is on.
    *
    * @param spin Which way it turns what it hits
-   * @param aim What it hits, or `null` for a miss
    * @returns Whether the gun was ready
    */
-  fire(spin: Spin, aim: Aim | null): boolean {
+  fire(spin: Spin): boolean {
     if (this.phase !== "playing" || this.shotCooldown > 0) return false;
     this.shotCooldown = SHOT_COOLDOWN;
+    const aim = this.aim;
     if (aim === null || !aim.enemy.alive) {
       this.#events.push({ type: "miss", what: spin });
-    } else if (!reachable(aim.enemy.species, aim.enemy.state, aim.spot)) {
-      // The far side: the round glances off, and says why.
-      this.#events.push({ type: "miss", what: "far" });
     } else {
       this.#turn(aim.enemy, aim.spot, spin);
+      this.#retarget();
     }
     this.#emit();
     return true;
   }
 
   /**
-   * A round at an orb: any round pops it.
+   * The e砲, at the front of the lane. At `e` it finishes the enemy; at anything else it bounces
+   * off, and knocks the enemy a step round for it.
    *
-   * @param orb What the pointer is on
-   * @returns Whether the gun was ready
-   */
-  shootOrb(orb: Orb): boolean {
-    if (this.phase !== "playing" || this.shotCooldown > 0) return false;
-    this.shotCooldown = SHOT_COOLDOWN;
-    this.#pop(orb);
-    this.#emit();
-    return true;
-  }
-
-  /**
-   * The e砲: every enemy in the beam, at once.
-   *
-   * It goes through everything it hits. The ones at `e` are finished, and each after the first
-   * doubles what the shot is worth; the ones that are not bounce it, and are knocked a step round
-   * for it.
-   *
-   * @param hit The enemies in the beam, nearest first
-   * @param orbs The orbs in it, which it pops on the way through
    * @returns Whether it was ready
    */
-  cannon(hit: readonly Enemy[], orbs: readonly Orb[] = []): boolean {
+  cannon(): boolean {
     if (this.phase !== "playing" || this.cannonCooldown > 0) return false;
     this.cannonCooldown = CANNON_COOLDOWN;
-    for (const orb of orbs) this.#pop(orb);
-
-    const live = hit.filter((e) => e.alive);
-    if (live.length === 0) {
+    const enemy = this.front;
+    if (enemy === null) {
       this.#events.push({ type: "miss", what: "cannon" });
       this.#emit();
       return true;
     }
 
-    const kills: Kill[] = [];
-    const bounced: Enemy[] = [];
-    for (const enemy of live) {
-      if (enemy.state !== 0) {
-        bounced.push(enemy);
-        continue;
-      }
-      this.combo += 1;
-      this.maxCombo = Math.max(this.maxCombo, this.combo);
-      const perfect = enemy.taken === enemy.start;
-      const multi = 2 ** kills.length;
-      enemy.lives -= 1;
-      const broken = enemy.lives <= 0;
-      const points = enemy.species.order * 10 * Math.min(this.combo, 10) *
-        multi * (perfect ? 2 : 1) * (enemy.boss && broken ? 5 : 1);
-      this.score += points;
-      if (perfect) this.perfects += 1;
-      kills.push({ enemy, points, perfect, broken });
-      if (broken) {
-        this.kills += 1;
-        enemy.alive = false;
-      }
-    }
-    if (bounced.length > 0) this.combo = 0;
-    this.enemies = this.enemies.filter((e) => e.alive);
-    this.#events.push({ type: "cannon", kills, bounced });
-    // A boss that survives scrambles again; a bounce knocks the enemy on — both after the beam,
-    // so the renderer draws the hit and then the spin.
-    for (const kill of kills) if (!kill.broken) this.#scramble(kill.enemy);
-    for (const enemy of bounced) {
+    if (enemy.state !== 0) {
+      this.combo = 0;
+      this.#events.push({ type: "cannon", kill: null, bounced: enemy });
       const s = enemy.species;
       const spots = s.spots.flatMap((_, i) =>
         reachable(s, enemy.state, i) ? [i] : []
       );
       const spot = spots[Math.floor(Math.random() * spots.length)];
       this.#turn(enemy, spot, SPINS[Math.floor(Math.random() * 2)]);
+      this.#retarget();
+      this.#emit();
+      return true;
     }
-    if (this.aim !== null && !this.aim.enemy.alive) this.aim = null;
+
+    this.combo += 1;
+    this.maxCombo = Math.max(this.maxCombo, this.combo);
+    const perfect = enemy.taken === enemy.start;
+    enemy.lives -= 1;
+    const broken = enemy.lives <= 0;
+    const points = enemy.species.order * 10 * Math.min(this.combo, 10) *
+      (perfect ? 2 : 1) * (enemy.boss && broken ? 5 : 1);
+    this.score += points;
+    if (perfect) this.perfects += 1;
+    if (broken) {
+      this.kills += 1;
+      enemy.alive = false;
+      this.enemies = this.enemies.filter((e) => e.alive);
+    }
+    this.#events.push({
+      type: "cannon",
+      kill: { enemy, points, perfect, broken },
+      bounced: null,
+    });
+    // A boss that survives scrambles again, after the beam, so the renderer draws the hit and
+    // then the spin.
+    if (!broken) this.#scramble(enemy);
+    this.#retarget();
     this.#emit();
     return true;
   }
@@ -463,77 +468,67 @@ class Game {
     this.shotCooldown = Math.max(0, this.shotCooldown - dt);
     this.cannonCooldown = Math.max(0, this.cannonCooldown - dt);
     let changed = !wasReady && this.cannonCooldown <= 0;
+    const frontBefore = this.front;
 
-    // Arrivals.
+    // Arrivals, once the far end of the lane is clear enough to take one.
     if (this.#queue.length > 0) {
       this.#spawnIn -= dt;
-      if (this.#spawnIn <= 0) {
+      const last = this.enemies[this.enemies.length - 1];
+      const room = last === undefined ||
+        (last.entry >= 1 && last.pos[2] > LANE_START + last.radius + 4);
+      if (this.#spawnIn <= 0 && room) {
         this.#spawn(this.#queue.shift()!);
         this.#spawnIn = this.#current.gap;
       }
     }
 
-    // Everyone closes in. One at `e` is stunned by it — a quarter of the speed — which is the
-    // window the e砲 is for.
+    // Coming in from the side, then down the lane in file. Nobody passes the one in front, and
+    // the front one, at `e`, is stunned by it — a quarter of the speed — which is the window the
+    // e砲 is for.
+    let ahead: Enemy | null = null;
     for (const enemy of this.enemies) {
-      const [x, y, z] = enemy.pos;
-      const r = Math.hypot(x, z) || 1;
-      const step = enemy.speed * dt * (enemy.state === 0 ? 0.25 : 1);
-      enemy.sway += dt;
-      // A slow weave across the approach, so the field is never a row of targets on rails.
-      const across = Math.cos(enemy.sway * 0.6) * 0.8 * dt;
-      enemy.pos = [
-        x - (x / r) * step + (-z / r) * across,
-        y,
-        z - (z / r) * step + (x / r) * across,
-      ];
-      if (
-        Math.hypot(enemy.pos[0], enemy.pos[2]) <
-          BREACH_RADIUS + enemy.radius * 0.5
-      ) {
+      if (enemy.entry < 1) {
+        enemy.entry = Math.min(1, enemy.entry + dt / ENTRY_TIME);
+        const t = enemy.entry;
+        const ease = 1 - (1 - t) ** 3;
+        enemy.pos = [
+          enemy.side * ENTRY_SIDE * (1 - ease),
+          enemy.pos[1],
+          LANE_START - 4 * (1 - ease),
+        ];
+        if (enemy.entry >= 1) {
+          this.#events.push({ type: "land", enemy });
+          changed = true;
+        }
+        ahead = enemy;
+        continue;
+      }
+      const stunned = ahead === null && enemy.state === 0;
+      let z = enemy.pos[2] + enemy.speed * dt * (stunned ? 0.25 : 1);
+      if (ahead !== null && ahead.entry >= 1) {
+        z = Math.min(z, ahead.pos[2] - (ahead.radius + enemy.radius + 1.2));
+      }
+      enemy.pos = [0, enemy.pos[1], z];
+      if (ahead === null && -z < BREACH_RADIUS + enemy.radius * 0.5) {
         enemy.alive = false;
         this.life -= enemy.boss ? 3 : 1;
         this.combo = 0;
         this.#events.push({ type: "breach", enemy });
         changed = true;
       }
+      ahead = enemy;
     }
     if (this.enemies.some((e) => !e.alive)) {
       this.enemies = this.enemies.filter((e) => e.alive);
-      if (this.aim !== null && !this.aim.enemy.alive) this.aim = null;
     }
 
-    // Orbs: fired on each enemy's own clock, flown straight, popped by any round.
-    for (const enemy of this.enemies) {
-      enemy.fireIn -= dt;
-      if (enemy.fireIn <= 0) {
-        this.#fireOrb(enemy);
-        enemy.fireIn = (this.#current.orbs ?? Infinity) *
-          (0.8 + Math.random() * 0.4);
-      }
+    // A new enemy at the front: the stick starts from its middle.
+    const front = this.front;
+    if (front !== frontBefore) {
+      this.cursor = [0, 0, 1];
+      changed = true;
     }
-    for (const orb of this.orbs) {
-      orb.pos = [
-        orb.pos[0] + orb.vel[0] * dt,
-        orb.pos[1] + orb.vel[1] * dt,
-        orb.pos[2] + orb.vel[2] * dt,
-      ];
-      const d = Math.hypot(
-        orb.pos[0] - TURRET[0],
-        orb.pos[1] - TURRET[1],
-        orb.pos[2] - TURRET[2],
-      );
-      if (d < ORB_HIT_RADIUS) {
-        orb.alive = false;
-        this.life -= 1;
-        this.combo = 0;
-        this.#events.push({ type: "struck", orb });
-        changed = true;
-      }
-    }
-    if (this.orbs.some((o) => !o.alive)) {
-      this.orbs = this.orbs.filter((o) => o.alive);
-    }
+    if (this.#retarget(false)) changed = true;
 
     if (this.life <= 0) {
       this.life = 0;
@@ -553,10 +548,7 @@ class Game {
     }
 
     // The wave is over once everyone has come and gone; a breath, then the next.
-    if (
-      this.#queue.length === 0 && this.enemies.length === 0 &&
-      this.orbs.length === 0
-    ) {
+    if (this.#queue.length === 0 && this.enemies.length === 0) {
       if (this.#breather === 0) {
         this.#events.push({ type: "clear", wave: this.wave });
         this.clearing = true;
@@ -607,6 +599,40 @@ class Game {
   subscribe(listener: Listener): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  /**
+   * Puts the aim on the reachable spot of the front enemy nearest the cursor.
+   *
+   * @param emit Whether to tell the HUD straight away
+   * @returns Whether the aim changed
+   */
+  #retarget(emit = true): boolean {
+    const f = this.front;
+    let next: Aim | null = null;
+    if (f !== null) {
+      let best = -1;
+      let bestDot = -Infinity;
+      const [cx, cy, cz] = this.cursor;
+      f.species.spots.forEach((_, i) => {
+        if (!reachable(f.species, f.state, i)) return;
+        const [x, y, z] = spotDir(f.species, f.state, i);
+        const d = x * cx + y * cy + z * cz;
+        if (d > bestDot + 1e-9) {
+          bestDot = d;
+          best = i;
+        }
+      });
+      if (best >= 0) next = { enemy: f, spot: best };
+    }
+    const a = this.aim;
+    const same = a === next ||
+      (a !== null && next !== null && a.enemy === next.enemy &&
+        a.spot === next.spot);
+    if (same) return false;
+    this.aim = next;
+    if (emit) this.#emit();
+    return true;
   }
 
   #turn(enemy: Enemy, spot: number, spin: Spin): void {
@@ -671,8 +697,9 @@ class Game {
     const choices = atDepth(species, d);
     const state = choices[Math.floor(Math.random() * choices.length)];
 
-    // Straight ahead is -Z; they come from a band across the far side of the field.
-    const radius = boss ? 4.6 : id === "S4" ? 2.7 : 3;
+    const radius = boss ? 4.2 : id === "S4" ? 2.7 : 3;
+    // They come in from alternate sides, so no two in a row cross the same way.
+    this.#side = this.#side === 1 ? -1 : 1;
     const enemy: Enemy = {
       id: this.#nextId++,
       species,
@@ -680,53 +707,20 @@ class Game {
       start: species.depth[state],
       taken: 0,
       pos: [
-        (Math.random() * 2 - 1) * w.spread * this.fieldScale,
-        radius + (boss ? 1.5 : 0.8 + Math.random() * 1.2),
-        -(boss ? 44 : 40 + Math.random() * 6),
+        this.#side * ENTRY_SIDE,
+        radius + (boss ? 1.2 : 0.9),
+        LANE_START - 4,
       ],
       radius,
-      speed: w.speed * (1 + 0.15 * this.lap) * (0.85 + Math.random() * 0.3),
-      sway: Math.random() * 10,
+      speed: w.speed * (1 + 0.15 * this.lap),
+      entry: 0,
+      side: this.#side,
       boss,
       lives: boss ? BOSS_LIVES : 1,
       alive: true,
-      // The first shot comes a little after arriving, so an enemy is seen before it shoots.
-      fireIn: w.orbs === undefined
-        ? Infinity
-        : w.orbs * (0.6 + Math.random() * 0.6),
     };
     this.enemies.push(enemy);
     this.#events.push({ type: "spawn", enemy });
-  }
-
-  #pop(orb: Orb): void {
-    if (!orb.alive) return;
-    orb.alive = false;
-    this.score += ORB_POINTS;
-    this.orbs = this.orbs.filter((o) => o.alive);
-    this.#events.push({ type: "pop", orb, points: ORB_POINTS });
-  }
-
-  /** An enemy firing: an orb, straight at the turret. */
-  #fireOrb(enemy: Enemy): void {
-    const [x, y, z] = enemy.pos;
-    const dx = TURRET[0] - x;
-    const dy = TURRET[1] - y;
-    const dz = TURRET[2] - z;
-    const l = Math.hypot(dx, dy, dz) || 1;
-    const k = ORB_SPEED * (1 + 0.1 * this.lap) / l;
-    const orb: Orb = {
-      id: this.#nextId++,
-      pos: [
-        x + dx / l * enemy.radius,
-        y + dy / l * enemy.radius,
-        z + dz / l * enemy.radius,
-      ],
-      vel: [dx * k, dy * k, dz * k],
-      alive: true,
-    };
-    this.orbs.push(orb);
-    this.#events.push({ type: "orb", orb, from: enemy });
   }
 
   #emit(): void {

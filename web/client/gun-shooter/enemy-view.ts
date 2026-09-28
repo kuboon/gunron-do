@@ -8,18 +8,18 @@
  * upright, precisely when the body's rotation is the identity.
  *
  * Everything the player reads is drawn plainly, lit like an object rather than glowing: faces in
- * muted colours with dark edges, the `e` face white with the letter in ink. On top of that, in the
- * frame (so it never moves with the body): a dashed outline where the `e` face belongs. And, when
+ * muted colours with dark edges, the `e` face white with the letter in ink, and on every other face
+ * an arrow pointing the short way round to the `e` face. On top of that, in the frame (so it never
+ * moves with the body): a dashed outline where the `e` face belongs. And, when
  * asked for, the spot the pointer is on with the axis through it, the spot the hint says to hit, or
  * the axis the enemy is turned about.
  */
 
 import * as THREE from "three";
 
-import type { Enemy } from "./game.ts";
+import { type Enemy, ENTRY_TIME } from "./game.ts";
 import { type Answer, type Species, type SpeciesId } from "./groups.ts";
 import {
-  DANGER,
   E_FACE,
   E_INK,
   FACE_COLORS,
@@ -28,7 +28,7 @@ import {
   SHOT_GLYPHS,
   SPECIES_COLORS,
 } from "./palette.ts";
-import type { Quat, Vec3 } from "./quat.ts";
+import { axisAngle, mul, normalize, type Quat, type Vec3 } from "./quat.ts";
 import { faceCentre, faceNormal } from "./solids.ts";
 
 /** The parts of a species' mesh that every enemy of that kind shares. */
@@ -38,6 +38,8 @@ interface Kit {
   edges: THREE.BufferGeometry;
   /** Where the `e` face belongs: a dashed outline just outside it. */
   socket: THREE.BufferGeometry;
+  /** On every other face, an arrow to the `e` face. */
+  arrows: THREE.BufferGeometry;
   colors: string[];
 }
 
@@ -50,33 +52,6 @@ export function faceColors(species: Species): string[] {
   return kit(species).colors;
 }
 
-/**
- * What a pointer on an enemy's surface is on: the spot a round would land at.
- *
- * The nearest spot to the point hit, with the small features given room: a corner, or an edge's
- * middle, would otherwise be a sliver no finger could hit. That is measured over every spot, not
- * only the ones on the face that was hit, so a point near the rim of a plate's face snaps to the
- * rim — a plate's rim is too thin to hit on purpose.
- *
- * @param enemy What was hit
- * @param local Where, in the body's own coordinates
- */
-export function spotAt(enemy: Enemy, local: THREE.Vector3): number {
-  const weight = { face: 1, edge: 0.7, vertex: 0.6 } as const;
-  let best = 0;
-  let bestD = Infinity;
-  enemy.species.spots.forEach((spot, i) => {
-    const [x, y, z] = spot.point;
-    const d = Math.hypot(local.x - x, local.y - y, local.z - z) *
-      weight[spot.kind];
-    if (d < bestD) {
-      bestD = d;
-      best = i;
-    }
-  });
-  return best;
-}
-
 export class EnemyView {
   readonly enemy: Enemy;
   readonly frame = new THREE.Group();
@@ -86,6 +61,7 @@ export class EnemyView {
   readonly #faceMat: THREE.MeshStandardMaterial;
   readonly #eMat: THREE.MeshStandardMaterial;
   readonly #edgeMat: THREE.LineBasicMaterial;
+  readonly #arrowMat: THREE.MeshBasicMaterial;
   readonly #socketMat: THREE.MeshBasicMaterial;
   readonly #socket: THREE.Mesh;
   readonly #shadow: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
@@ -114,7 +90,7 @@ export class EnemyView {
     THREE.MeshBasicMaterial
   >;
 
-  #aim: { spot: number; reachable: boolean } | null = null;
+  #aim: number | null = null;
   #hint: Answer | null = null;
   #hintKey = "";
   #axis: Vec3 | null = null;
@@ -126,6 +102,8 @@ export class EnemyView {
   #born = 0;
   #home = 0;
   #hit = 0;
+  /** 0 while it comes in from the side, easing to 1 once it is on the lane. */
+  #land = 0;
 
   constructor(enemy: Enemy) {
     this.enemy = enemy;
@@ -148,11 +126,22 @@ export class EnemyView {
       emissiveIntensity: 0,
     });
     this.#edgeMat = new THREE.LineBasicMaterial({ color: 0x120c1c });
+    this.#arrowMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(E_INK),
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
 
     const faces = new THREE.Mesh(k.faces, this.#faceMat);
     const eFace = new THREE.Mesh(k.eFace, this.#eMat);
     const edges = new THREE.LineSegments(k.edges, this.#edgeMat);
-    this.body.add(faces, eFace, edges);
+    const arrows = new THREE.Mesh(k.arrows, this.#arrowMat);
+    this.body.add(faces, eFace, edges, arrows);
     this.pickables = [faces, eFace];
 
     this.#socketMat = new THREE.MeshBasicMaterial({
@@ -252,19 +241,17 @@ export class EnemyView {
     return [this.#shadow, this.#ground];
   }
 
-  /** Where the pointer is on this enemy, or `null` when it is elsewhere. */
-  setAim(aim: { spot: number; reachable: boolean } | null): void {
-    this.#aim = aim;
-    if (aim === null) return;
-    const spot = this.enemy.species.spots[aim.spot];
-    const d = new THREE.Vector3(...spot.dir);
-    const p = new THREE.Vector3(...spot.point);
+  /** The spot the stick is on, or `null` when this is not the enemy at the front. */
+  setAim(spot: number | null): void {
+    if (spot === this.#aim) return;
+    this.#aim = spot;
+    if (spot === null) return;
+    const s = this.enemy.species.spots[spot];
+    const d = new THREE.Vector3(...s.dir);
+    const p = new THREE.Vector3(...s.point);
     this.#aimRing.position.copy(p).addScaledVector(d, 0.03);
     this.#aimRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), d);
     this.#aimAxis.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
-    const c = aim.reachable ? 0xffffff : DANGER;
-    this.#aimRing.material.color.set(c);
-    this.#aimAxis.material.color.set(c);
   }
 
   /** What the hints show on this enemy: a shot to make, or the axis it is turned about. */
@@ -351,7 +338,20 @@ export class EnemyView {
     this.#born = Math.min(1, this.#born + dt * 1.6);
     const grow = easeOutBack(this.#born);
 
-    if (this.#spin < 1) {
+    const entering = this.enemy.entry < 1;
+    if (entering) {
+      // Coming in from the side: tumbling slowly about a slanted axis, so every side of it shows
+      // once, and winding down to a stop exactly in its element as it lands on the lane.
+      const ease = 1 - (1 - this.enemy.entry) ** 3;
+      const left = (1 - ease) * ENTRY_TIME * 2.4;
+      const q = mul(axisAngle(TUMBLE_AXIS, -this.enemy.side * left), [
+        this.#to.x,
+        this.#to.y,
+        this.#to.z,
+        this.#to.w,
+      ]);
+      this.body.quaternion.set(q[0], q[1], q[2], q[3]);
+    } else if (this.#spin < 1) {
       this.#spin = Math.min(1, this.#spin + dt / 0.3);
       this.body.quaternion.slerpQuaternions(
         this.#from,
@@ -361,7 +361,7 @@ export class EnemyView {
     } else {
       this.body.quaternion.copy(this.#to);
     }
-    const settled = this.#spin >= 1;
+    const settled = this.#spin >= 1 && !entering;
 
     const athome = this.enemy.state === 0 && settled;
     this.#home += ((athome ? 1 : 0) - this.#home) * Math.min(1, dt * 8);
@@ -375,7 +375,8 @@ export class EnemyView {
     this.#faceMat.emissiveIntensity = this.#hit * 0.35;
     this.#eMat.emissiveIntensity = this.#home * (0.15 + beat * 0.2);
     this.#edgeMat.color.set(0x120c1c).lerp(new THREE.Color(GOLD), this.#home);
-    this.#socketMat.opacity = 0.85 * (1 - this.#home);
+    this.#land += ((entering ? 0 : 1) - this.#land) * Math.min(1, dt * 5);
+    this.#socketMat.opacity = 0.85 * (1 - this.#home) * this.#land;
     this.#ground.material.color.set(SPECIES_COLORS[this.enemy.species.id])
       .lerp(new THREE.Color(GOLD), this.#home);
     this.#ground.material.opacity = 0.35 + this.#home * (0.3 + beat * 0.3);
@@ -403,6 +404,7 @@ export class EnemyView {
     this.#faceMat.dispose();
     this.#eMat.dispose();
     this.#edgeMat.dispose();
+    this.#arrowMat.dispose();
     this.#socketMat.dispose();
     for (
       const m of [
@@ -423,6 +425,9 @@ export class EnemyView {
     this.#ground.material.dispose();
   }
 }
+
+/** What an enemy coming in tumbles about: slanted, so its top and sides both come round. */
+const TUMBLE_AXIS = normalize([0.35, 1, 0.45]);
 
 /** Past 1 and back: the settle of something that landed hard. */
 function easeOutBack(t: number, s = 1.70158): number {
@@ -537,10 +542,69 @@ function kit(species: Species): Kit {
     eFace: eGeo,
     edges: edgeGeo,
     socket,
+    arrows: arrowsTo(vertices, faces, new THREE.Vector3(...n)),
     colors,
   };
   kits.set(species.id, made);
   return made;
+}
+
+/**
+ * On every face but the `e` face, a flat arrow pointing the short way round the solid to it.
+ *
+ * The way is the `e` face's normal laid into the face's plane: the first step of the great circle
+ * from this face's direction to the `e` face's. The face straight opposite has no such way — every
+ * direction is as short as every other — so it gets no arrow.
+ *
+ * @param vertices The solid's corners
+ * @param faces Its faces, the `e` face first
+ * @param home The `e` face's normal
+ */
+function arrowsTo(
+  vertices: readonly Vec3[],
+  faces: readonly (readonly number[])[],
+  home: THREE.Vector3,
+): THREE.BufferGeometry {
+  const pos: number[] = [];
+  // The arrow in its own units: along `u` towards the `e` face, across along `v`.
+  const outline: [number, number][] = [
+    [-0.6, -0.13],
+    [0.08, -0.13],
+    [0.08, -0.4],
+    [0.62, 0],
+    [0.08, 0.4],
+    [0.08, 0.13],
+    [-0.6, 0.13],
+  ];
+  const tris = [[0, 1, 5], [0, 5, 6], [2, 3, 4]];
+  faces.forEach((face, fi) => {
+    if (fi === 0) return;
+    const n = new THREE.Vector3(...faceNormal(vertices, face));
+    const u = home.clone().addScaledVector(n, -home.dot(n));
+    if (u.length() < 1e-3) return;
+    u.normalize();
+    const v = n.clone().cross(u);
+    const [cx, cy, cz] = faceCentre(vertices, face);
+    const c = new THREE.Vector3(cx, cy, cz);
+    // The face's inscribed circle, so the arrow fits a triangle, a square and a pentagon alike.
+    const r = Math.min(
+      ...face.map((i, k) => {
+        const a = new THREE.Vector3(...vertices[i]);
+        const b = new THREE.Vector3(...vertices[face[(k + 1) % face.length]]);
+        return a.add(b).multiplyScalar(0.5).distanceTo(c);
+      }),
+    );
+    const at = outline.map(([x, y]) =>
+      c.clone().addScaledVector(u, x * r).addScaledVector(v, y * r)
+        .addScaledVector(n, 0.01)
+    );
+    for (const t of tris) {
+      for (const i of t) pos.push(at[i].x, at[i].y, at[i].z);
+    }
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  return geo;
 }
 
 /** A closed polygon drawn as flat dashes of a given width, lying in the plane with normal `n`. */

@@ -241,6 +241,11 @@ its home pose, the `e` face upright and facing the turret. Bring an enemy to `e`
 and the e砲 finishes it; fire the e砲 at anything else and it bounces, knocking
 the enemy one more step round.
 
+The enemies come down one lane in the middle of the field, in single file, and
+only the one at the front can be shot. Each comes in from the side first,
+tumbling slowly so every side of it shows once, and stops turning as it lands on
+the lane — in the element it will be shot from. Nobody shoots back.
+
 The shots are where they land. Every rotation of these solids is a turn about
 one axis, and every axis comes out through a face's middle, a corner, or an
 edge's middle. A round that hits one of those spots turns the enemy one step
@@ -255,18 +260,24 @@ an edge or a corner, a table of what each round at each spot does to each
 element, and every element's distance home. A spot is fixed to the body, so a
 shot multiplies on the right: `g · s`.
 
+Nothing is aimed by pointing. A joystick picks the spot: on a phone it appears
+under the left thumb and the buttons sit under the right; at a keyboard it is
+W A S D, a step to the next spot that way at a time, or the mouse, as a stick
+centred on the front enemy; J, K and L (or Space) fire. `game.ts` keeps where
+the stick points as a direction in the front enemy's frame and aims at the
+reachable spot nearest it, so after a turn the stick stays put and the aim is
+whatever spot is there now. Rounds only reach the turret's half of an enemy,
+which costs nothing: every axis has at least one end on that half, and both ways
+round are available from either end.
+
 The camera is above and behind the turret, so the side of an enemy the player
 sees is roughly the side its `e` face belongs on. A dashed outline marks where
-the `e` face goes. Picking is on the solid itself: a ray from the camera finds
-the point under the pointer, and it snaps to the nearest spot, corners and
-edges weighted so they are not slivers (and a plate's rim can be hit from near
-the edge of its face). Rounds only reach the turret's half of an enemy, which
-costs nothing: every axis has at least one end on that half, and both ways
-round are available from either end.
+the `e` face goes, and every other face carries an arrow pointing the short way
+round to it (the face straight opposite has none: every way is as short).
 
 The field teaches in three steps: on the first two waves every enemy shows the
 spot to hit and which way; on the next two it shows only the axis it is turned
-about; after that, nothing. The HUD always names the spot under the pointer —
+about; after that, nothing. The HUD always names the spot the stick is on —
 "頂点を通る軸で 120°（3 回で 1 周・位数 3）".
 
 Only the effects glow. The bloom pass is thresholded above white, and the
