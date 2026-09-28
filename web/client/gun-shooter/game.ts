@@ -10,8 +10,9 @@
  * file, each in a random element of its group, and only the one at the front can be shot. The
  * joystick picks a spot on it — the middle of a face, a corner, the middle of an edge — and a round
  * turns it one step about the axis through that spot (see `groups.ts`). Once it is at `e` — its `e`
- * face upright and facing the turret — the e砲 destroys it. The e砲 at anything else bounces off
- * and knocks the enemy one more step round. An enemy that reaches the turret costs a life.
+ * face upright and facing the turret — the e砲 destroys it. The e砲 at anything else bounces off,
+ * and the enemy turns slowly once round on the spot, back to where it was, while it keeps coming
+ * and cannot be fired at. An enemy that reaches the turret costs a life.
  *
  * What the renderer needs to animate comes out as events, drained once a frame: a shot landing is
  * one rotation from one element to another, and the renderer spins the mesh between the two. The
@@ -28,7 +29,6 @@ import {
   type Species,
   type SpeciesId,
   type Spin,
-  SPINS,
   spotDir,
 } from "./groups.ts";
 import type { Quat, Vec3 } from "./quat.ts";
@@ -72,6 +72,9 @@ export const SHOT_COOLDOWN = 0.12;
 /** Seconds the e砲 needs to recharge. */
 export const CANNON_COOLDOWN = 0.7;
 
+/** Seconds an enemy spends turning once round on the spot after an e砲 that missed. */
+export const WHIRL_TIME = 2.4;
+
 /** How many times the boss has to be brought home and shot before it breaks. */
 const BOSS_LIVES = 3;
 
@@ -101,6 +104,11 @@ export interface Enemy {
   entry: number;
   /** Which side it comes in from: -1 left, 1 right. */
   side: -1 | 1;
+  /**
+   * Seconds left of turning once round on the spot, after an e砲 that missed. It ends where it
+   * began, and nothing can be fired at it until it has.
+   */
+  whirl: number;
   boss: boolean;
   /** How many more times it has to be finished. 1 for everything but the boss. */
   lives: number;
@@ -404,6 +412,7 @@ class Game {
     if (this.phase !== "playing" || this.shotCooldown > 0) return false;
     this.shotCooldown = SHOT_COOLDOWN;
     const aim = this.aim;
+    if (aim !== null && aim.enemy.whirl > 0) return false;
     if (aim === null || !aim.enemy.alive) {
       this.#events.push({ type: "miss", what: spin });
     } else {
@@ -416,14 +425,15 @@ class Game {
 
   /**
    * The e砲, at the front of the lane. At `e` it finishes the enemy; at anything else it bounces
-   * off, and knocks the enemy a step round for it.
+   * off, and the enemy turns once round on the spot for `WHIRL_TIME`, out of reach meanwhile.
    *
    * @returns Whether it was ready
    */
   cannon(): boolean {
     if (this.phase !== "playing" || this.cannonCooldown > 0) return false;
-    this.cannonCooldown = CANNON_COOLDOWN;
     const enemy = this.front;
+    if (enemy !== null && enemy.whirl > 0) return false;
+    this.cannonCooldown = CANNON_COOLDOWN;
     if (enemy === null) {
       this.#events.push({ type: "miss", what: "cannon" });
       this.#emit();
@@ -432,14 +442,8 @@ class Game {
 
     if (enemy.state !== 0) {
       this.combo = 0;
+      enemy.whirl = WHIRL_TIME;
       this.#events.push({ type: "cannon", kill: null, bounced: enemy });
-      const s = enemy.species;
-      const spots = s.spots.flatMap((_, i) =>
-        reachable(s, enemy.state, i) ? [i] : []
-      );
-      const spot = spots[Math.floor(Math.random() * spots.length)];
-      this.#turn(enemy, spot, SPINS[Math.floor(Math.random() * 2)]);
-      this.#retarget();
       this.#emit();
       return true;
     }
@@ -519,6 +523,10 @@ class Game {
         }
         ahead = enemy;
         continue;
+      }
+      if (enemy.whirl > 0) {
+        enemy.whirl = Math.max(0, enemy.whirl - dt);
+        if (enemy.whirl === 0) changed = true;
       }
       const stunned = ahead === null && enemy.state === 0;
       let z = enemy.pos[2] + enemy.speed * dt * (stunned ? 0.25 : 1);
@@ -732,6 +740,7 @@ class Game {
       speed: w.speed * (1 + 0.15 * this.lap),
       entry: 0,
       side: this.#side,
+      whirl: 0,
       boss,
       lives: boss ? BOSS_LIVES : 1,
       alive: true,

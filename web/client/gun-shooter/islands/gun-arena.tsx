@@ -336,7 +336,8 @@ export const GunArena = clientEntry(
                   </li>
                   <li>
                     e 以外に e砲 を当てると{" "}
-                    <b style={{ color: DANGER }}>反発</b>してさらに回る
+                    <b style={{ color: DANGER }}>反発</b>して、1
+                    回転する間は撃てない
                   </li>
                   <li mix={fineOnlyStyle}>
                     W A S D（またはマウス）で選ぶ・J で ↺ / K で ↻・L か Space

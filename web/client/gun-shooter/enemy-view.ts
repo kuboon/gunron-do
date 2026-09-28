@@ -17,7 +17,7 @@
 
 import * as THREE from "three";
 
-import { type Enemy, ENTRY_TIME } from "./game.ts";
+import { type Enemy, ENTRY_TIME, WHIRL_TIME } from "./game.ts";
 import { type Answer, type Species, type SpeciesId } from "./groups.ts";
 import {
   E_FACE,
@@ -351,6 +351,19 @@ export class EnemyView {
         this.#to.w,
       ]);
       this.body.quaternion.set(q[0], q[1], q[2], q[3]);
+    } else if (this.enemy.whirl > 0) {
+      // An e砲 that missed: once round, slowly, about the upright, easing in and out so it ends
+      // exactly where it began. A turn it was still finishing is over.
+      this.#spin = 1;
+      const u = 1 - this.enemy.whirl / WHIRL_TIME;
+      const angle = Math.PI * (1 - Math.cos(Math.PI * u));
+      const q = mul(axisAngle([0, 1, 0], angle), [
+        this.#to.x,
+        this.#to.y,
+        this.#to.z,
+        this.#to.w,
+      ]);
+      this.body.quaternion.set(q[0], q[1], q[2], q[3]);
     } else if (this.#spin < 1) {
       this.#spin = Math.min(1, this.#spin + dt / 0.3);
       this.body.quaternion.slerpQuaternions(
@@ -361,7 +374,7 @@ export class EnemyView {
     } else {
       this.body.quaternion.copy(this.#to);
     }
-    const settled = this.#spin >= 1 && !entering;
+    const settled = this.#spin >= 1 && !entering && this.enemy.whirl <= 0;
 
     const athome = this.enemy.state === 0 && settled;
     this.#home += ((athome ? 1 : 0) - this.#home) * Math.min(1, dt * 8);
