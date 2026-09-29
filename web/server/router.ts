@@ -228,8 +228,6 @@ export const entryPoints: readonly string[] = [
   // Prefix-free, like the cards: the build mounts the site under the deploy prefix itself.
   routes.tetraDoOg.href().slice(base.length),
   ...ogPaths(),
-  // A throwaway page for checking in-page links in Firefox; nothing links to it. Remove with it.
-  "/static/anchor-test.html",
 ];
 
 export default router;
