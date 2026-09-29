@@ -238,8 +238,10 @@ A shooter where the targets are groups. Each enemy is a solid — a triangle or
 square plate, a tetrahedron, a cube, a dodecahedron — whose rotations form D₃,
 D₄, A₄, S₄ or A₅, and its state is one element of that group: the rotation from
 its home pose, the `e` face upright and facing the turret. Bring an enemy to `e`
-and the e砲 finishes it; fire the e砲 at anything else and it bounces, knocking
-the enemy one more step round.
+and the e砲 finishes it; fire the e砲 at anything else and it bounces, and the
+enemy turns slowly once round on the spot — back where it was, out of reach
+meanwhile, still coming. The square plate comes first: its quarter turns are the
+easiest to read.
 
 The enemies come down one lane in the middle of the field, in single file, and
 only the one at the front can be shot. Each comes in from the side first,
@@ -257,12 +259,16 @@ a cube's face or two steps round a dodecahedron's take two. `groups.ts` works
 all of it out from the solid at load — the elements, the axes (from the elements
 themselves), the spots where they leave the surface and whether that is a face,
 an edge or a corner, a table of what each round at each spot does to each
-element, and every element's distance home. A spot is fixed to the body, so a
-shot multiplies on the right: `g · s`.
+element, and every element's distance home. A plate is named as the player sees
+it, a polygon rather than a thin prism: its corners are corners and the middles
+of its sides are edges. A spot is fixed to the body, so a shot multiplies on the
+right: `g · s`.
 
 Nothing is aimed by pointing. A joystick picks the spot: on a phone it appears
 under the left thumb and the buttons sit under the right; at a keyboard it is
-W A S D, a step to the next spot that way at a time, or the mouse, as a stick
+W A S D, a step to the next spot that way at a time — a tie between the middle
+and the next spot round goes to the middle, so on a triangle's hexagon of spots
+one key always leads back — or the mouse, as a stick
 centred on the front enemy; J, K and L (or Space) fire. `game.ts` keeps where
 the stick points as a direction in the front enemy's frame and aims at the
 reachable spot nearest it, so after a turn the stick stays put and the aim is
@@ -277,7 +283,8 @@ round to it (the face straight opposite has none: every way is as short).
 
 The field teaches in three steps: on the first two waves every enemy shows the
 spot to hit and which way; on the next two it shows only the axis it is turned
-about; after that, nothing. The HUD always names the spot the stick is on —
+about; after that, nothing. An axis through a corner is never drawn as a line:
+the corner lights up instead, for the aim, the hint and the turn alike. The HUD always names the spot the stick is on —
 "頂点を通る軸で 120°（3 回で 1 周・位数 3）".
 
 Only the effects glow. The bloom pass is thresholded above white, and the

@@ -89,6 +89,16 @@ export class EnemyView {
     THREE.CylinderGeometry,
     THREE.MeshBasicMaterial
   >;
+  // At a corner there is no line: the corner itself lights up, for the aim, the hint, the turn
+  // and the enemy's own axis alike. A turn about a corner leaves the corner where it is.
+  readonly #aimGlow = glowSprite();
+  readonly #hintGlow = glowSprite();
+  readonly #turnGlow = glowSprite();
+  readonly #ownGlow = glowSprite();
+  #aimCorner = false;
+  #hintCorner = false;
+  #turnCorner = false;
+  #ownCorner = false;
 
   #aim: number | null = null;
   #hint: Answer | null = null;
@@ -198,7 +208,15 @@ export class EnemyView {
       unlit(0xffffff),
     );
     this.#turnAxis.renderOrder = 16;
-    this.body.add(this.#aimRing, this.#aimAxis, this.#hintRing);
+    this.body.add(
+      this.#aimRing,
+      this.#aimAxis,
+      this.#hintRing,
+      this.#aimGlow,
+      this.#hintGlow,
+      this.#turnGlow,
+      this.#ownGlow,
+    );
     this.frame.add(
       this.body,
       this.#socket,
@@ -249,6 +267,8 @@ export class EnemyView {
     const s = this.enemy.species.spots[spot];
     const d = new THREE.Vector3(...s.dir);
     const p = new THREE.Vector3(...s.point);
+    this.#aimCorner = s.kind === "vertex";
+    this.#aimGlow.position.copy(p);
     this.#aimRing.position.copy(p).addScaledVector(d, 0.03);
     this.#aimRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), d);
     this.#aimAxis.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
@@ -262,6 +282,9 @@ export class EnemyView {
       const spot = this.enemy.species.spots[hint.spot];
       const d = new THREE.Vector3(...spot.dir);
       const p = new THREE.Vector3(...spot.point);
+      this.#hintCorner = spot.kind === "vertex";
+      this.#hintGlow.position.copy(p);
+      this.#hintGlow.material.color.set(SHOT_COLORS[hint.spin]);
       this.#hintRing.position.copy(p).addScaledVector(d, 0.02);
       this.#hintRing.quaternion.setFromUnitVectors(
         new THREE.Vector3(0, 0, 1),
@@ -285,11 +308,25 @@ export class EnemyView {
         this.#hintLabel.scale.set(hint.times > 1 ? 0.78 : 0.5, 0.5, 1);
       }
     }
+    this.#ownCorner = false;
     if (axis !== null) {
       this.#ownAxis.quaternion.setFromUnitVectors(
         new THREE.Vector3(0, 1, 0),
         new THREE.Vector3(...axis),
       );
+      // The end of the axis on the turret's side, found among the spots in the pose it is in.
+      const s = this.enemy.species;
+      const q = s.elements[this.enemy.state];
+      const pose = new THREE.Quaternion(q[0], q[1], q[2], q[3]);
+      const a = new THREE.Vector3(...axis);
+      if (a.z < 0) a.negate();
+      const end = s.spots.find((spot) =>
+        new THREE.Vector3(...spot.dir).applyQuaternion(pose).dot(a) > 1 - 1e-6
+      );
+      if (end?.kind === "vertex") {
+        this.#ownCorner = true;
+        this.#ownGlow.position.set(...end.point);
+      }
     }
   }
 
@@ -299,8 +336,9 @@ export class EnemyView {
    * @param from The element it was in
    * @param to The element it is in now
    * @param color The round's colour, lit along the axis while it turns
+   * @param spot Where the round landed, when a round did it
    */
-  turn(from: Quat, to: Quat, color: string): void {
+  turn(from: Quat, to: Quat, color: string, spot?: number): void {
     this.#from.set(from[0], from[1], from[2], from[3]);
     this.#to.set(to[0], to[1], to[2], to[3]);
     // The turn, seen from outside: `to · from⁻¹`, and its axis is lit.
@@ -313,6 +351,10 @@ export class EnemyView {
       axis,
     );
     this.#turnAxis.material.color.set(color);
+    const hit = spot === undefined ? null : this.enemy.species.spots[spot];
+    this.#turnCorner = hit?.kind === "vertex";
+    if (hit !== null) this.#turnGlow.position.set(...hit.point);
+    this.#turnGlow.material.color.set(color);
     this.#spin = 0;
     this.#pop = 1;
     this.#hit = 1;
@@ -394,23 +436,37 @@ export class EnemyView {
       .lerp(new THREE.Color(GOLD), this.#home);
     this.#ground.material.opacity = 0.35 + this.#home * (0.3 + beat * 0.3);
 
-    // The turn's axis, fading as it lands.
-    this.#turnAxis.material.opacity = settled ? 0 : (1 - this.#spin) * 0.9;
+    // The turn's axis, fading as it lands — or at a corner, the corner.
+    const turnOn = settled ? 0 : (1 - this.#spin) * 0.9;
+    this.#turnAxis.material.opacity = this.#turnCorner ? 0 : turnOn;
+    this.#turnGlow.material.opacity = this.#turnCorner ? turnOn : 0;
+    this.#turnGlow.scale.setScalar(0.5 + 0.3 * (1 - this.#spin));
 
     // The pointer's spot and its axis. Hidden mid-turn: the spot is moving with the body.
     const aimOn = this.#aim !== null && settled ? 1 : 0;
-    this.#aimRing.material.opacity = aimOn * 0.95;
-    this.#aimAxis.material.opacity = aimOn * 0.55;
     const ringPulse = 1 + Math.sin(time * 10) * 0.12;
+    this.#aimRing.material.opacity = this.#aimCorner ? 0 : aimOn * 0.95;
+    this.#aimAxis.material.opacity = this.#aimCorner ? 0 : aimOn * 0.55;
     this.#aimRing.scale.setScalar(ringPulse);
+    this.#aimGlow.material.opacity = this.#aimCorner ? aimOn : 0;
+    this.#aimGlow.scale.setScalar(0.42 * ringPulse);
 
     const hintOn = this.#hint !== null && settled && !athome ? 1 : 0;
-    this.#hintRing.material.opacity = hintOn *
-      (0.65 + 0.35 * Math.sin(time * 6));
-    this.#hintRing.scale.setScalar(1 + 0.25 * (0.5 + 0.5 * Math.sin(time * 6)));
+    const hintPulse = 0.5 + 0.5 * Math.sin(time * 6);
+    this.#hintRing.material.opacity = this.#hintCorner
+      ? 0
+      : hintOn * (0.65 + 0.35 * Math.sin(time * 6));
+    this.#hintRing.scale.setScalar(1 + 0.25 * hintPulse);
+    this.#hintGlow.material.opacity = this.#hintCorner
+      ? hintOn * (0.6 + 0.4 * hintPulse)
+      : 0;
+    this.#hintGlow.scale.setScalar(0.55 + 0.2 * hintPulse);
     this.#hintLabel.material.opacity = hintOn;
 
-    this.#ownAxis.material.opacity = this.#axis !== null && settled ? 0.7 : 0;
+    const ownOn = this.#axis !== null && settled ? 0.7 : 0;
+    this.#ownAxis.material.opacity = this.#ownCorner ? 0 : ownOn;
+    this.#ownGlow.material.opacity = this.#ownCorner ? ownOn : 0;
+    this.#ownGlow.scale.setScalar(0.45);
   }
 
   dispose(): void {
@@ -432,6 +488,11 @@ export class EnemyView {
       m.material.dispose();
     }
     this.#hintLabel.material.dispose();
+    for (
+      const g of [this.#aimGlow, this.#hintGlow, this.#turnGlow, this.#ownGlow]
+    ) {
+      g.material.dispose();
+    }
     this.#shadow.geometry.dispose();
     this.#shadow.material.dispose();
     this.#ground.geometry.dispose();
@@ -712,6 +773,49 @@ function label(text: string, color: string): THREE.Texture {
 let shadowTex: THREE.Texture | null = null;
 
 /** A soft dark disc. */
+/** A soft light for a corner: drawn over everything, and bright enough to bloom. */
+function glowSprite(): THREE.Sprite {
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: glowTexture(),
+      color: new THREE.Color(0xffffff),
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
+  sprite.renderOrder = 22;
+  return sprite;
+}
+
+let glowTex: THREE.Texture | null = null;
+
+function glowTexture(): THREE.Texture {
+  if (glowTex) return glowTex;
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const g = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    0,
+    size / 2,
+    size / 2,
+    size / 2,
+  );
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.25, "rgba(255,255,255,0.85)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  glowTex = new THREE.CanvasTexture(canvas);
+  return glowTex;
+}
+
 function shadowTexture(): THREE.Texture {
   if (shadowTex) return shadowTex;
   const size = 64;
