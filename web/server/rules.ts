@@ -16,8 +16,8 @@
  */
 
 import { markdownToHast, tocFromHast } from "@kuboon/md";
-import { hastToRemix } from "@kuboon/md/hast_to_remix.ts";
-import type { RemixNode } from "@remix-run/ui";
+import { hastToElement } from "@kuboon/md/hast_to_element.ts";
+import { createElement, type RemixNode } from "@remix-run/ui";
 import { extract } from "@std/front-matter/yaml";
 
 import { type Game, games } from "../client/games.ts";
@@ -48,9 +48,9 @@ export interface Rules {
  * of the two: a name that is not in the list never becomes a file name at all.
  *
  * `@kuboon/md` parses GitHub-flavored Markdown into a sanitized hast tree (heading anchors,
- * Shiki-highlighted code, tables) and `hastToRemix` converts it to `@remix-run/ui` elements. That
- * converter is its own entry point, so importing `@kuboon/md` does not put a UI framework into the
- * graph of anyone who only wants HTML out.
+ * Shiki-highlighted code, tables) and `hastToElement` builds `@remix-run/ui` elements from it with
+ * the `createElement` handed to it. The converter imports no UI framework of its own, so there is
+ * one `@remix-run/ui` in the graph — this site's — whatever version the site is on.
  *
  * The contents come out of the same tree, from `tocFromHast`: it reads the `id` each heading was
  * already given rather than slugging the text a second time, so a contents link and the heading it
@@ -79,7 +79,7 @@ export async function readRules(game: Game): Promise<Rules | null> {
     summary: typeof front.summary === "string"
       ? front.summary
       : game.description,
-    body: hastToRemix(hast) as RemixNode,
+    body: hastToElement(hast, createElement) as RemixNode,
     toc: tocFromHast(hast),
   };
 }

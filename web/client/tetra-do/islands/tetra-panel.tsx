@@ -128,8 +128,6 @@ export const TetraPanel = clientEntry(
     });
     handle.signal.addEventListener("abort", stopUnlocks, { once: true });
 
-    const shareRow = createShareRow(handle);
-
     return () => {
       if (session === null) return null;
       // The lesson is the board itself, so the panel has to be off it.
@@ -294,7 +292,7 @@ export const TetraPanel = clientEntry(
 );
 
 /**
- * The share row under 再生する, for one island.
+ * The share row under 再生する.
  *
  * `@kuboon/share-element`'s `<share-buttons>`, built by hand rather than written as a tag: it is a
  * custom element and the JSX here knows the DOM's own elements only, so calling the package's
@@ -306,49 +304,40 @@ export const TetraPanel = clientEntry(
  * person, and what a crawler finds here is the game's card — the same picture for every round ever
  * played. `shareCardUrl` builds the link that carries *this* round's numbers instead.
  *
- * The row is put back after every render rather than once. The box is empty as far as the
- * reconciler knows, and `@remix-run/ui@0.10.0` clears an element whose children go from none to
- * none — so the first render after the row went in took it out again, and `ref` fires on insert
- * only, so nothing brought it back. It showed for as long as the panel went without an update,
- * which was sometimes the whole visit and sometimes a blink. The clearing is fixed upstream
- * (remix-run/remix#11880) and unreleased; once it ships, this can go back to filling the box once.
- * `data-rmx-preserve-dom` does not cover it — that is read by frame reloads, not by an island's
- * own render — but it keeps a frame reload off the row too.
+ * The box is filled once, when it goes in. It is empty as far as the reconciler knows, and a render
+ * leaves an element with no children of its own alone. `data-rmx-preserve-dom` does the same for a
+ * frame reload, which is the other thing that could take the row back.
  *
  * `data-share-row` is what the unlayered rules in `static/app.css` key off — the package injects
  * its own defaults unlayered, and unlayered CSS outranks every `@layer`, so a `css(...)` mixin
  * cannot reach them.
  *
- * @param handle The island the row sits in, whose renders it follows
- * @returns What draws the row's box, given what the buttons share
+ * @param url What the buttons share
+ * @returns The row's own box, filled once it is in the document
  */
-function createShareRow(handle: Handle): (url: string) => RemixNode {
-  let box: Element | null = null;
-  let row: ShareButtonsElement | null = null;
-  let url = "";
+function shareRow(url: string): RemixNode {
+  return (
+    <div
+      mix={[shareStyle, ref((node) => fillShareRow(node, url))]}
+      data-rmx-preserve-dom
+      data-share-row
+    />
+  );
+}
 
-  /** Puts the row in the box if a render took it out, and tells it what it shares. */
-  function attach(): void {
-    if (box === null) return;
-    row ??= createShareButtons();
-    row.url = url;
-    if (row.parentNode !== box) box.append(row);
+/**
+ * Puts the buttons in the box, and tells them what they share.
+ *
+ * @param node The box
+ * @param url What the buttons share
+ */
+function fillShareRow(node: Element, url: string): void {
+  let row = node.firstElementChild as ShareButtonsElement | null;
+  if (row === null) {
+    row = createShareButtons();
+    node.append(row);
   }
-
-  function hold(node: Element, signal: AbortSignal): void {
-    box = node;
-    signal.addEventListener("abort", () => {
-      if (box === node) box = null;
-    }, { once: true });
-  }
-
-  return (next) => {
-    url = next;
-    handle.queueTask(attach);
-    return (
-      <div mix={[shareStyle, ref(hold)]} data-rmx-preserve-dom data-share-row />
-    );
-  };
+  row.url = url;
 }
 
 /**

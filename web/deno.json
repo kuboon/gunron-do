@@ -9,17 +9,17 @@
   "unstable": ["bundle"],
   "minimumDependencyAge": {
     "age": "P1D",
-    "exclude": ["jsr:@kuboon/*", "jsr:@remix-kbn/*"]
+    "exclude": ["jsr:@kuboon/*", "jsr:@remix-kbn/*", "npm:@remix-run/*"]
   },
   "imports": {
     "@kuboon/game-center-sdk": "jsr:@kuboon/game-center-sdk@^0.4.0",
     "@kuboon/share-element": "jsr:@kuboon/share-element@^0.5.0",
-    "@remix-run/fetch-router": "npm:@remix-run/fetch-router@^0.22.1",
-    "@remix-run/render-middleware": "npm:@remix-run/render-middleware@^0.3.1",
-    "@remix-run/ui": "npm:@remix-run/ui@^0.10.0",
+    "@remix-run/fetch-router": "npm:@remix-run/fetch-router@^0.22.2",
+    "@remix-run/render-middleware": "npm:@remix-run/render-middleware@^0.3.2",
+    "@remix-run/ui": "npm:@remix-run/ui@^0.11.0",
     "@remix-kbn/assets-deno": "jsr:@remix-kbn/assets-deno@^0.8.0",
-    "@remix-kbn/ssg": "jsr:@remix-kbn/ssg@^0.11.0",
-    "@kuboon/md": "jsr:@kuboon/md@^0.6.0",
+    "@remix-kbn/ssg": "jsr:@remix-kbn/ssg@^0.12.0",
+    "@kuboon/md": "jsr:@kuboon/md@^0.7.0",
     "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
     "canvaskit-wasm": "npm:canvaskit-wasm@^0.40.0",
     "three": "npm:three@^0.186.0",
