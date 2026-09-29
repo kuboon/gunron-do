@@ -34,7 +34,7 @@ import { cellGlyph } from "../cell.tsx";
 import { refuseDoubleTap, refuseZoomGestures } from "../../gestures.ts";
 import { type Burst, type BurstCell, game, HEIGHT, WIDTH } from "../game.ts";
 import { ink, OP_COLORS, surface } from "../palette.ts";
-import { freeReduction, opBase } from "../rotation.ts";
+import { opBase, traceReduction } from "../rotation.ts";
 
 /**
  * The board's own measurements, in pixels.
@@ -137,7 +137,7 @@ export const TetraBoard = clientEntry(
       const popping = game.popping;
       // Which of the traced cells cancel each other out. They are what the line goes dim for, so
       // a trace that is all cancellation looks like what it is before the finger comes up.
-      const { cancelled } = freeReduction(game.word);
+      const { cancelled } = traceReduction(game.word);
 
       const broken = game.broken;
       const overrun = game.overrun;
