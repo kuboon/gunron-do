@@ -35,6 +35,8 @@ export const routes = route(base, {
   tetraDoOg: get("/tetra-do/og.json"),
   /** 群シューター, full screen. */
   gunShooter: get("/gun-shooter"),
+  /** M₁₂, M₂₄ and Dotto, the three puzzles from Scientific American (2008), on one page. */
+  sciAmerican2008: get("/sci-american-2008"),
   /** Any game's rules, from `rules.md` in its directory under `server/`. */
   rules: get("/:game/rules"),
 });

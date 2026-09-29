@@ -150,6 +150,13 @@ web/
       sound.ts       # every sound, synthesised
       islands/
         gun-arena.tsx  # the arena's box, and the HUD over it
+    sci-american-2008/  # M₁₂, M₂₄ and Dotto, the three puzzles from Scientific American
+      page.tsx       # the page: where they come from, and one island
+      moves.ts       # the moves as data — permutations, and Dotto's table and its four ops
+      puzzles.ts     # the boards, the table and the tabs, drawn into the island's box
+      source.ts      # the source article's link
+      islands/
+        sa08-puzzles.tsx  # the box puzzles.ts draws into
     tetra-do/        # everything テトラ道 is in the browser
       page.tsx       # the screen: six islands and where they go
       rotation.ts    # the group: six moves, and the arithmetic that composes them
@@ -175,6 +182,8 @@ web/
     rules.ts         # the rules: the Markdown, and what turns it into a page
     gun-shooter/
       rules.md       # 群シューター's rules
+    sci-american-2008/
+      rules.md       # the three puzzles' rules, and what the reconstruction guessed
     tetra-do/        # everything テトラ道 is on the server
       rules.md       # its rules
       art.ts         # the picture on its social card
@@ -306,6 +315,27 @@ children are none (`textContent = ""`) whenever the island redraws —
 `data-rmx-preserve-dom` does not stop it — so a canvas appended into an empty box
 vanishes on the first HUD update. `gun-arena.tsx` renders one `<span hidden />`
 into the box, and the canvas the engine appends after it is left alone.
+
+## 3つの群論パズル
+
+Three puzzles from Scientific American's July 2008 article "Simple Groups at
+Play" (in Japanese in 日経サイエンス, October 2008 —
+[the magazine's page](https://www.nikkei-science.com/threePuzzle.html)), one page
+with a tab each: M₁₂ (put 1–12 back in order with two moves), M₂₄ (a circle of
+23 and a 0 outside, with two turns and a swap) and Dotto (a 24 × 24 table of
+numbers, four moves, Conway's Co₀).
+
+They started as a single self-contained page and stay close to it. The boards
+are a few dozen absolutely placed tiles animated by hand and the Dotto table is
+576 cells rewritten per move, so `puzzles.ts` draws straight into a box the
+island hands it rather than going through components, and scopes its styles
+under `.sa08` over the site's colour tokens. `moves.ts` holds the moves as data,
+with no DOM, and `moves_test.ts` checks them: M₁₂'s two moves reach exactly
+95,040 orderings, and every Dotto move keeps each row's sum of squares.
+
+Where the article's figures could not be checked — the merge's exact order, M₂₄'s
+colours, Dotto's columns and starting table — the data is a reconstruction that
+meets the article's conditions; the rules page says which.
 
 ## Styling
 
