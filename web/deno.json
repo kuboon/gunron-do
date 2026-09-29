@@ -21,7 +21,10 @@
     "@remix-kbn/ssg": "jsr:@remix-kbn/ssg@^0.11.0",
     "@kuboon/md": "jsr:@kuboon/md@^0.6.0",
     "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
-    "canvaskit-wasm": "npm:canvaskit-wasm@^0.40.0"
+    "canvaskit-wasm": "npm:canvaskit-wasm@^0.40.0",
+    "three": "npm:three@^0.186.0",
+    "three/addons/": "npm:/three@^0.186.0/examples/jsm/",
+    "@types/three": "npm:@types/three@^0.186.0"
   },
   "fmt": {
     "exclude": ["dist", "node_modules"],

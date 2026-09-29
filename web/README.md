@@ -137,6 +137,19 @@ web/
     pages/
       index.tsx      # home — the list of games
       rules.tsx      # any game's rules, around a rendered Markdown body
+    gun-shooter/     # everything 群シューター is in the browser
+      page.tsx       # the screen: one island, the arena and its HUD
+      quat.ts        # the rotation arithmetic the rules are decided on
+      solids.ts      # the five enemy bodies, each set up in its home pose
+      groups.ts      # each group, its axes and spots, and what a shot at each does
+      game.ts        # waves, shots, the e砲, the score — and the one instance
+      engine.ts      # three.js: the camera, picking a spot, input, the juice
+      enemy-view.ts  # one enemy's mesh, turned to the element it is in
+      fx.ts          # sparks, shards, shockwaves, beams, popups
+      stage.ts       # the floor, and the line round the turret
+      sound.ts       # every sound, synthesised
+      islands/
+        gun-arena.tsx  # the arena's box, and the HUD over it
     tetra-do/        # everything テトラ道 is in the browser
       page.tsx       # the screen: six islands and where they go
       rotation.ts    # the group: six moves, and the arithmetic that composes them
@@ -160,6 +173,8 @@ web/
     router.ts        # the wiring — routes to pages, plus the rest of the site
     assets.ts        # client/ compiled as one graph
     rules.ts         # the rules: the Markdown, and what turns it into a page
+    gun-shooter/
+      rules.md       # 群シューター's rules
     tetra-do/        # everything テトラ道 is on the server
       rules.md       # its rules
       art.ts         # the picture on its social card
@@ -216,6 +231,74 @@ drops the site's header and footer: on a phone the board should be as wide as
 the phone. It is also the one page that overrides the shell's viewport meta,
 because `env(safe-area-inset-*)` reads `0px` until a page asks for
 `viewport-fit=cover`.
+
+## 群シューター
+
+A shooter where the targets are groups. Each enemy is a solid — a triangle or
+square plate, a tetrahedron, a cube, a dodecahedron — whose rotations form D₃,
+D₄, A₄, S₄ or A₅, and its state is one element of that group: the rotation from
+its home pose, the `e` face upright and facing the turret. Bring an enemy to `e`
+and the e砲 finishes it; fire the e砲 at anything else and it bounces, knocking
+the enemy one more step round.
+
+The enemies come down one lane in the middle of the field, in single file, and
+only the one at the front can be shot. Each comes in from the side first,
+tumbling slowly so every side of it shows once, and stops turning as it lands on
+the lane — in the element it will be shot from. Nobody shoots back.
+
+The shots are where they land. Every rotation of these solids is a turn about
+one axis, and every axis comes out through a face's middle, a corner, or an
+edge's middle. A round that hits one of those spots turns the enemy one step
+about the axis through it — `360° / k`, `k` being how many steps make a full
+turn — clockwise or anticlockwise as the turret sees it, by which button fired
+it. So undoing an enemy is its inverse: the same axis, the other way. Most
+elements are one step about some axis and go home in one shot; a half turn about
+a cube's face or two steps round a dodecahedron's take two. `groups.ts` works
+all of it out from the solid at load — the elements, the axes (from the elements
+themselves), the spots where they leave the surface and whether that is a face,
+an edge or a corner, a table of what each round at each spot does to each
+element, and every element's distance home. A spot is fixed to the body, so a
+shot multiplies on the right: `g · s`.
+
+Nothing is aimed by pointing. A joystick picks the spot: on a phone it appears
+under the left thumb and the buttons sit under the right; at a keyboard it is
+W A S D, a step to the next spot that way at a time, or the mouse, as a stick
+centred on the front enemy; J, K and L (or Space) fire. `game.ts` keeps where
+the stick points as a direction in the front enemy's frame and aims at the
+reachable spot nearest it, so after a turn the stick stays put and the aim is
+whatever spot is there now. Rounds only reach the turret's half of an enemy,
+which costs nothing: every axis has at least one end on that half, and both ways
+round are available from either end.
+
+The camera is above and behind the turret, so the side of an enemy the player
+sees is roughly the side its `e` face belongs on. A dashed outline marks where
+the `e` face goes, and every other face carries an arrow pointing the short way
+round to it (the face straight opposite has none: every way is as short).
+
+The field teaches in three steps: on the first two waves every enemy shows the
+spot to hit and which way; on the next two it shows only the axis it is turned
+about; after that, nothing. The HUD always names the spot the stick is on —
+"頂点を通る軸で 120°（3 回で 1 周・位数 3）".
+
+Only the effects glow. The bloom pass is thresholded above white, and the
+enemies are lit, matte and never pushed past it, so the `e` on one — ink on a
+white face — stays legible through any explosion.
+
+The rules are plain numbers. `solids.ts` builds each body in its home pose,
+`groups.ts` works out its group as above, and `game.ts` runs the waves on top.
+Nothing there touches three.js.
+
+`engine.ts` is the only module that does, and the island loads it with a dynamic
+`import()` once it is in a browser. That keeps three.js (most of a 600 KB chunk)
+out of the server render and out of the page's first download: the HUD hydrates
+immediately and the arena follows.
+
+One thing about handing a box to code the island does not render: give the box a
+fixed child. `@remix-run/ui`'s reconciler empties an element whose rendered
+children are none (`textContent = ""`) whenever the island redraws —
+`data-rmx-preserve-dom` does not stop it — so a canvas appended into an empty box
+vanishes on the first HUD update. `gun-arena.tsx` renders one `<span hidden />`
+into the box, and the canvas the engine appends after it is left alone.
 
 ## Styling
 
