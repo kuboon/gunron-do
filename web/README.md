@@ -320,7 +320,7 @@ into the box, and the canvas the engine appends after it is left alone.
 
 Three puzzles from Scientific American's July 2008 article "Simple Groups at
 Play" (in Japanese in 日経サイエンス, October 2008 —
-[the magazine's page](https://www.nikkei-science.com/threePuzzle.html)), one page
+[the magazine's page](https://www.nikkei-science.com/threePuzzle.ntml)), one page
 with a tab each: M₁₂ (put 1–12 back in order with two moves), M₂₄ (a circle of
 23 and a 0 outside, with two turns and a swap) and Dotto (a 24 × 24 table of
 numbers, four moves, Conway's Co₀).

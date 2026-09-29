@@ -8,7 +8,7 @@ summary: Scientific American 2008年7月号「Simple Groups at Play」で紹介�
 Scientific American 2008年7月号の記事「Simple Groups at Play」で紹介された3つのパズルを再現したものです。
 記事は日経サイエンス 2008年10月号に翻訳掲載されました。
 
-- [日経サイエンス「3つのパズル」](https://www.nikkei-science.com/threePuzzle.html)
+- [日経サイエンス「3つのパズル」](https://www.nikkei-science.com/threePuzzle.ntml)
 
 3つとも、散在型単純群（またはその近く）の元を、並べ替えや表の変化として見せるパズルです。
 
