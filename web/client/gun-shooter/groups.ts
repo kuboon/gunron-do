@@ -149,7 +149,7 @@ function species(
   });
   const spots: Spot[] = lines.flatMap(({ dir, count }) =>
     [dir, scale(dir, -1)].map((d) => surface(planes, d, count + 1))
-  );
+  ).map((spot) => solid.kind === "plate" ? asPlate(spot) : spot);
 
   const next: Record<Spin, number[][]> = { ccw: [], cw: [] };
   for (const spin of SPINS) {
@@ -215,6 +215,18 @@ function surface(
     point: scale(dir, t),
     fold,
   };
+}
+
+/**
+ * A spot on a plate, named as the player sees the plate: a polygon, not a thin prism. The prism's
+ * side edges are the polygon's corners, and its side faces are the polygon's sides.
+ */
+function asPlate(spot: Spot): Spot {
+  if (spot.kind === "edge") return { ...spot, kind: "vertex" };
+  if (spot.kind === "face" && Math.abs(spot.dir[2]) < 0.5) {
+    return { ...spot, kind: "edge" };
+  }
+  return spot;
 }
 
 /** The five kinds, built once. */

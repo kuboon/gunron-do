@@ -480,7 +480,7 @@ export function start(host: HTMLElement): () => void {
           { enemy: ev.enemy, spot: ev.spot },
           new THREE.Vector3(),
         );
-        view?.turn(ev.from, ev.to, color);
+        view?.turn(ev.from, ev.to, color, ev.spot);
         fx.burst(at, color, 16, { speed: 6, size: 0.16, life: 0.35 });
         fx.ring(at, color, 0.2, 1.4, 0.25);
         addTrauma(0.05);

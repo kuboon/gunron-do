@@ -13,7 +13,7 @@ import { color } from "../tokens.ts";
 
 export const title = "gunron-do — 群論で遊ぶ";
 export const description =
-  "群を題材にした小さなゲームを置いていく場所。いまのところ「テトラ道」と「群シューター」の2つ。";
+  "群を題材にした小さなゲームを置いていく場所。いまのところ「テトラ道」「群シューター」「3つの群論パズル」の3つ。";
 
 export default function Home(): RemixNode {
   return (

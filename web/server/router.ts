@@ -43,6 +43,7 @@ import { routes } from "../client/routes.ts";
 import * as Home from "../client/pages/index.tsx";
 import * as TetraDo from "../client/tetra-do/page.tsx";
 import * as GunShooter from "../client/gun-shooter/page.tsx";
+import * as SciAmerican2008 from "../client/sci-american-2008/page.tsx";
 import RulesPage from "../client/pages/rules.tsx";
 
 /** Deploy path prefix. The build strips it back off when writing, so output lands at the root. */
@@ -153,6 +154,10 @@ router.get(routes.home, pageAction(routes.home, Home));
 // One line per game. The screen is bespoke, so it is named here rather than looked up.
 router.get(routes.tetraDo, pageAction(routes.tetraDo, TetraDo));
 router.get(routes.gunShooter, pageAction(routes.gunShooter, GunShooter));
+router.get(
+  routes.sciAmerican2008,
+  pageAction(routes.sciAmerican2008, SciAmerican2008),
+);
 
 // The card a shared round carries. Not a card this site draws — a template og.kbn.one fills in,
 // published as one JSON file so a link to a round can show what the round came to. It never

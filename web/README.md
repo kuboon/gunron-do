@@ -150,6 +150,13 @@ web/
       sound.ts       # every sound, synthesised
       islands/
         gun-arena.tsx  # the arena's box, and the HUD over it
+    sci-american-2008/  # M₁₂, M₂₄ and Dotto, the three puzzles from Scientific American
+      page.tsx       # the page: where they come from, and one island
+      moves.ts       # the moves as data — permutations, and Dotto's table and its four ops
+      puzzles.ts     # the boards, the table and the tabs, drawn into the island's box
+      source.ts      # the source article's link
+      islands/
+        sa08-puzzles.tsx  # the box puzzles.ts draws into
     tetra-do/        # everything テトラ道 is in the browser
       page.tsx       # the screen: six islands and where they go
       rotation.ts    # the group: six moves, and the arithmetic that composes them
@@ -175,6 +182,8 @@ web/
     rules.ts         # the rules: the Markdown, and what turns it into a page
     gun-shooter/
       rules.md       # 群シューター's rules
+    sci-american-2008/
+      rules.md       # the three puzzles' rules, and what the reconstruction guessed
     tetra-do/        # everything テトラ道 is on the server
       rules.md       # its rules
       art.ts         # the picture on its social card
@@ -238,8 +247,10 @@ A shooter where the targets are groups. Each enemy is a solid — a triangle or
 square plate, a tetrahedron, a cube, a dodecahedron — whose rotations form D₃,
 D₄, A₄, S₄ or A₅, and its state is one element of that group: the rotation from
 its home pose, the `e` face upright and facing the turret. Bring an enemy to `e`
-and the e砲 finishes it; fire the e砲 at anything else and it bounces, knocking
-the enemy one more step round.
+and the e砲 finishes it; fire the e砲 at anything else and it bounces, and the
+enemy turns slowly once round on the spot — back where it was, out of reach
+meanwhile, still coming. The square plate comes first: its quarter turns are the
+easiest to read.
 
 The enemies come down one lane in the middle of the field, in single file, and
 only the one at the front can be shot. Each comes in from the side first,
@@ -257,12 +268,16 @@ a cube's face or two steps round a dodecahedron's take two. `groups.ts` works
 all of it out from the solid at load — the elements, the axes (from the elements
 themselves), the spots where they leave the surface and whether that is a face,
 an edge or a corner, a table of what each round at each spot does to each
-element, and every element's distance home. A spot is fixed to the body, so a
-shot multiplies on the right: `g · s`.
+element, and every element's distance home. A plate is named as the player sees
+it, a polygon rather than a thin prism: its corners are corners and the middles
+of its sides are edges. A spot is fixed to the body, so a shot multiplies on the
+right: `g · s`.
 
 Nothing is aimed by pointing. A joystick picks the spot: on a phone it appears
 under the left thumb and the buttons sit under the right; at a keyboard it is
-W A S D, a step to the next spot that way at a time, or the mouse, as a stick
+W A S D, a step to the next spot that way at a time — a tie between the middle
+and the next spot round goes to the middle, so on a triangle's hexagon of spots
+one key always leads back — or the mouse, as a stick
 centred on the front enemy; J, K and L (or Space) fire. `game.ts` keeps where
 the stick points as a direction in the front enemy's frame and aims at the
 reachable spot nearest it, so after a turn the stick stays put and the aim is
@@ -277,7 +292,8 @@ round to it (the face straight opposite has none: every way is as short).
 
 The field teaches in three steps: on the first two waves every enemy shows the
 spot to hit and which way; on the next two it shows only the axis it is turned
-about; after that, nothing. The HUD always names the spot the stick is on —
+about; after that, nothing. An axis through a corner is never drawn as a line:
+the corner lights up instead, for the aim, the hint and the turn alike. The HUD always names the spot the stick is on —
 "頂点を通る軸で 120°（3 回で 1 周・位数 3）".
 
 Only the effects glow. The bloom pass is thresholded above white, and the
@@ -299,6 +315,27 @@ children are none (`textContent = ""`) whenever the island redraws —
 `data-rmx-preserve-dom` does not stop it — so a canvas appended into an empty box
 vanishes on the first HUD update. `gun-arena.tsx` renders one `<span hidden />`
 into the box, and the canvas the engine appends after it is left alone.
+
+## 3つの群論パズル
+
+Three puzzles from Scientific American's July 2008 article "Simple Groups at
+Play" (in Japanese in 日経サイエンス, October 2008 —
+[the magazine's page](https://www.nikkei-science.com/threePuzzle.ntml)), one page
+with a tab each: M₁₂ (put 1–12 back in order with two moves), M₂₄ (a circle of
+23 and a 0 outside, with two turns and a swap) and Dotto (a 24 × 24 table of
+numbers, four moves, Conway's Co₀).
+
+They started as a single self-contained page and stay close to it. The boards
+are a few dozen absolutely placed tiles animated by hand and the Dotto table is
+576 cells rewritten per move, so `puzzles.ts` draws straight into a box the
+island hands it rather than going through components, and scopes its styles
+under `.sa08` over the site's colour tokens. `moves.ts` holds the moves as data,
+with no DOM, and `moves_test.ts` checks them: M₁₂'s two moves reach exactly
+95,040 orderings, and every Dotto move keeps each row's sum of squares.
+
+Where the article's figures could not be checked — the merge's exact order, M₂₄'s
+colours, Dotto's columns and starting table — the data is a reconstruction that
+meets the article's conditions; the rules page says which.
 
 ## Styling
 

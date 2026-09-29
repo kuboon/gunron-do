@@ -6,6 +6,7 @@
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | [テトラ道](./web/server/tetra-do/rules.md)        | 正四面体を120°ずつ回す操作が並んだ盤面をなぞり、元の向きに戻る経路を探す。群は A₄。                                |
 | [群シューター](./web/server/gun-shooter/rules.md) | 1 列でやってくる立体の敵の、ジョイスティックで選んだ場所を軸にして回し、`e` の向きに戻ったところを e砲 で撃ち抜くシューティング。群は D₃・D₄・A₄・S₄・A₅。 |
+| [3つの群論パズル](./web/server/sci-american-2008/rules.md) | Scientific American 2008「Simple Groups at Play」の3つのパズル（M₁₂・M₂₄・Dotto）の再現。出典は[日経サイエンス](https://www.nikkei-science.com/threePuzzle.ntml)。 |
 
 ゲームはひとつずつ増やしていく。増やし方は [`web/README.md`](./web/README.md)
 の「Adding a game」にある。

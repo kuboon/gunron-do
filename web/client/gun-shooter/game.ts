@@ -185,16 +185,16 @@ interface Wave {
 
 const WAVES: readonly Wave[] = [
   {
-    title: "D₃ 正三角形",
-    spawns: [["D3", 4]],
-    depth: [1, 1],
+    title: "D₄ 正方形",
+    spawns: [["D4", 4]],
+    depth: [1, 2],
     speed: 1.3,
     gap: 5,
   },
   {
-    title: "D₄ 正方形",
-    spawns: [["D4", 5]],
-    depth: [1, 2],
+    title: "D₃ 正三角形",
+    spawns: [["D3", 5]],
+    depth: [1, 1],
     speed: 1.35,
     gap: 4.6,
   },
@@ -389,9 +389,11 @@ class Game {
       const vy = qy - py;
       const along = vx * dx + vy * dy;
       const off = Math.abs(vx * dy - vy * dx);
-      // Only spots that way, within a cone; the nearest along it, straightest first.
-      if (along < 0.05 || off > along * 1.2) return;
-      const cost = along + off * 2;
+      // Only spots that way, within a wide cone; the nearest, straighter first. On a hexagon of
+      // spots — D₃ — the middle is exactly as near as the next corner round, so a tie goes
+      // inwards: from any corner, some key leads straight back to the middle.
+      if (along < 0.05 || off > along * 1.8) return;
+      const cost = Math.hypot(vx, vy) + off * 0.5 + Math.hypot(qx, qy) * 0.01;
       if (cost < bestCost) {
         bestCost = cost;
         best = i;

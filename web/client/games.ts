@@ -51,6 +51,16 @@ export const games: readonly Game[] = [
     rulesHref: routes.rules.href({ game: "gun-shooter" }),
     note: "調整中。まだ全然面白くない",
   },
+  {
+    slug: "sci-american-2008",
+    title: "3つの群論パズル",
+    tagline: "M₁₂・M₂₄・Dotto。Scientific American 2008 のパズルを再現。",
+    description:
+      "Scientific American 2008年7月号「Simple Groups at Play」で紹介された3つのパズルの再現。" +
+      "マシュー群 M₁₂・M₂₄ の並べ替えと、コンウェイ群 Co₀ の 24×24 の表を、決められた操作だけで元に戻す。",
+    href: routes.sciAmerican2008.href(),
+    rulesHref: routes.rules.href({ game: "sci-american-2008" }),
+  },
 ];
 
 /**
