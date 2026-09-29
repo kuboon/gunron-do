@@ -25,6 +25,8 @@ export interface Game {
   href: string;
   /** Its rules. */
   rulesHref: string;
+  /** A caveat shown beside the link on the home page, while the game is not what it should be. */
+  note?: string;
 }
 
 export const games: readonly Game[] = [
@@ -47,6 +49,7 @@ export const games: readonly Game[] = [
       "撃つかで回転の軸が決まる。同じ軸で逆に回す、つまり逆元を撃って敵を単位元 e に戻し、e砲でとどめ。",
     href: routes.gunShooter.href(),
     rulesHref: routes.rules.href({ game: "gun-shooter" }),
+    note: "調整中。まだ全然面白くない",
   },
 ];
 

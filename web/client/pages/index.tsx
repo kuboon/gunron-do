@@ -13,7 +13,7 @@ import { color } from "../tokens.ts";
 
 export const title = "gunron-do — 群論で遊ぶ";
 export const description =
-  "群を題材にした小さなゲームを置いていく場所。いまのところ「テトラ道」が1つ。";
+  "群を題材にした小さなゲームを置いていく場所。いまのところ「テトラ道」と「群シューター」の2つ。";
 
 export default function Home(): RemixNode {
   return (
@@ -30,6 +30,7 @@ export default function Home(): RemixNode {
           <p mix={linksStyle}>
             <a mix={buttonStyle} href={game.href}>あそぶ →</a>
             <a href={game.rulesHref}>ルールを読む</a>
+            {game.note ? <span mix={noteStyle}>{game.note}</span> : null}
           </p>
         </section>
       ))}
@@ -48,6 +49,11 @@ const gameTitleStyle = css({
   marginTop: 0,
   marginBottom: "0.25rem",
   fontSize: "1.4rem",
+});
+
+const noteStyle = css({
+  fontSize: "0.9rem",
+  color: color.muted,
 });
 
 const linksStyle = css({
