@@ -18,6 +18,10 @@
  * combination of steps lands on a sour interval.
  */
 
+import { GameAudio, type Track } from "@kuboon/bgm";
+
+import { INSTRUMENTS, THEME } from "./music.ts";
+
 /** Semitones above the root, in the five-note scale everything here is built from. */
 const PENTATONIC = [0, 2, 4, 7, 9];
 
@@ -26,6 +30,13 @@ const ROOT = 220;
 
 /** Master level. Quiet on purpose — a puzzle game is played next to other things. */
 const MASTER = 0.16;
+
+/** The tune's level, under the effects: it is there to fill the silence, not to compete. */
+const MUSIC_LEVEL = 0.3;
+
+/** Seconds the tune takes to come in, and to go when the round is over. */
+const MUSIC_FADE_IN = 0.4;
+const MUSIC_FADE_OUT = 1.2;
 
 /** Where the preference is kept between visits. */
 const STORAGE_KEY = "tetra-do:sound";
@@ -63,6 +74,11 @@ class Sound {
   #waiting: AbortController | null = null;
   /** Who wants telling when {@link Sound.blocked} changes. */
   #listeners = new Set<() => void>();
+  /** The tune's player, on the same context as everything else, made the first time it is asked for. */
+  #music: GameAudio | null = null;
+  #theme: Track | null = null;
+  /** Whether the game wants the tune on, which the switch can overrule but does not forget. */
+  #musicWanted = false;
 
   /** Whether sounds play. Read on every call, so toggling is immediate. */
   get enabled(): boolean {
@@ -104,6 +120,7 @@ class Sound {
       // A browser with storage blocked still gets the toggle, just not the memory of it.
     }
     if (this.#enabled) this.step(0);
+    this.#syncMusic();
     return this.#enabled;
   }
 
@@ -166,6 +183,39 @@ class Sound {
         signal: this.#waiting.signal,
       });
     }
+  }
+
+  /**
+   * The tune under the round: on while one is being played or watched, off the rest of the time.
+   *
+   * Remembered rather than acted on alone, so the sound switch can take the tune away and give it
+   * back in the middle of a round. Asked for again, it starts again from the top: a new round is a
+   * new round.
+   *
+   * @param playing Whether the round wants it
+   */
+  music(playing: boolean): void {
+    this.#musicWanted = playing;
+    this.#syncMusic();
+  }
+
+  #syncMusic(): void {
+    if (!this.#musicWanted || !this.enabled) {
+      this.#music?.stopBgm({ fade: MUSIC_FADE_OUT });
+      return;
+    }
+    const ctx = this.#ctx();
+    if (ctx === null) return;
+    if (this.#music === null) {
+      // Handed the context rather than making its own: one context is one thing for the browser to
+      // unlock, and the effects and the tune share the same switch.
+      this.#music = new GameAudio({ context: ctx });
+      this.#music.setVolume("bgm", MUSIC_LEVEL);
+    }
+    // Rendered once, on the first round, and kept: it is a tenth of a second of arithmetic, and the
+    // lead-in is there to hide it.
+    this.#theme ??= this.#music.compose(THEME, INSTRUMENTS);
+    this.#music.playBgm(this.#theme, { fade: MUSIC_FADE_IN, restart: true });
   }
 
   /** Plays a handful of notes. Each is an oscillator and an envelope, and nothing else. */
