@@ -41,6 +41,9 @@ const MUSIC_FADE_OUT = 1.2;
 /** Where the preference is kept between visits. */
 const STORAGE_KEY = "tetra-do:sound";
 
+/** Where the tune's own switch is kept: the effects can stay on with the tune off. */
+const MUSIC_STORAGE_KEY = "tetra-do:music";
+
 /** One note, as the synth takes it. */
 interface Note {
   /** Hz. */
@@ -69,6 +72,7 @@ function pitch(step: number): number {
 class Sound {
   #context: AudioContext | null = null;
   #enabled = true;
+  #musicEnabled = true;
   #loaded = false;
   /** The listeners waiting for a gesture to start the context with, while one is waiting. */
   #waiting: AbortController | null = null;
@@ -124,13 +128,41 @@ class Sound {
     return this.#enabled;
   }
 
+  /**
+   * Whether the tune plays under a round. Its own switch, because the effects say what the trace
+   * is doing and the tune says nothing — a player who wants quiet usually wants only the tune gone.
+   * The sound switch still silences both.
+   */
+  get musicEnabled(): boolean {
+    this.#load();
+    return this.#musicEnabled;
+  }
+
+  /** Turns the tune on or off, and remembers which. */
+  toggleMusic(): boolean {
+    this.#load();
+    this.#musicEnabled = !this.#musicEnabled;
+    try {
+      localStorage.setItem(
+        MUSIC_STORAGE_KEY,
+        this.#musicEnabled ? "on" : "off",
+      );
+    } catch {
+      // As with the sound switch: the toggle works, the memory of it does not.
+    }
+    this.#syncMusic();
+    return this.#musicEnabled;
+  }
+
   #load(): void {
     if (this.#loaded) return;
     this.#loaded = true;
     try {
       this.#enabled = localStorage.getItem(STORAGE_KEY) !== "off";
+      this.#musicEnabled = localStorage.getItem(MUSIC_STORAGE_KEY) !== "off";
     } catch {
       this.#enabled = true;
+      this.#musicEnabled = true;
     }
   }
 
@@ -200,7 +232,7 @@ class Sound {
   }
 
   #syncMusic(): void {
-    if (!this.#musicWanted || !this.enabled) {
+    if (!this.#musicWanted || !this.enabled || !this.musicEnabled) {
       this.#music?.stopBgm({ fade: MUSIC_FADE_OUT });
       return;
     }
