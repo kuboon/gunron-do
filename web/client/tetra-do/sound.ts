@@ -97,12 +97,16 @@ class Sound {
    * has touched. One touch anywhere clears it.
    */
   get blocked(): boolean {
-    return this.enabled && this.#context?.state === "suspended";
+    if (!this.enabled || this.#context?.state !== "suspended") return false;
+    // A context made inside a touch still reads "suspended" until the browser gets round to
+    // starting it, a moment later. That moment is not a page waiting to be touched — the touch
+    // has happened — and saying otherwise flashes the wrong label at the player.
+    return !(globalThis.navigator?.userActivation?.isActive ?? false);
   }
 
   /**
-   * Called when the browser lets the sound out, so a button that says otherwise can stop saying
-   * it. Nothing else here changes without the caller knowing.
+   * Called whenever the browser starts or stops the sound, so a button that reads
+   * {@link Sound.blocked} stays true to it. Nothing else here changes without the caller knowing.
    *
    * @param listener What to run
    * @returns The way to stop listening
@@ -175,7 +179,19 @@ class Sound {
   #ctx(): AudioContext | null {
     if (!this.enabled) return null;
     if (typeof AudioContext === "undefined") return null;
-    this.#context ??= new AudioContext();
+    if (this.#context === null) {
+      this.#context = new AudioContext();
+      // Whatever starts or stops the context — a touch, the browser getting round to it, the tab
+      // being hidden — the button that reads `blocked` hears about it here, rather than on the
+      // game's next change, which during the count-in is three seconds away.
+      this.#context.addEventListener("statechange", () => {
+        if (this.#context?.state === "running") {
+          this.#waiting?.abort();
+          this.#waiting = null;
+        }
+        for (const listener of this.#listeners) listener();
+      });
+    }
     if (this.#context.state === "suspended") {
       void this.#context.resume();
       this.#waitForGesture();
@@ -200,12 +216,8 @@ class Sound {
     const start = (): void => {
       const context = this.#context;
       if (context === null) return;
-      void context.resume().then(() => {
-        if (context.state !== "running") return;
-        this.#waiting?.abort();
-        this.#waiting = null;
-        for (const listener of this.#listeners) listener();
-      });
+      // The context's own `statechange` stops this listening and tells the button.
+      void context.resume();
     };
 
     for (const type of ["pointerdown", "keydown", "touchend"]) {
