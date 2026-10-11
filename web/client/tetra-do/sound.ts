@@ -18,6 +18,10 @@
  * combination of steps lands on a sour interval.
  */
 
+import { GameAudio, type Track } from "@kuboon/bgm";
+
+import { INSTRUMENTS, THEME } from "./music.ts";
+
 /** Semitones above the root, in the five-note scale everything here is built from. */
 const PENTATONIC = [0, 2, 4, 7, 9];
 
@@ -27,8 +31,18 @@ const ROOT = 220;
 /** Master level. Quiet on purpose — a puzzle game is played next to other things. */
 const MASTER = 0.16;
 
+/** The tune's level, under the effects: it is there to fill the silence, not to compete. */
+const MUSIC_LEVEL = 0.3;
+
+/** Seconds the tune takes to come in, and to go when the round is over. */
+const MUSIC_FADE_IN = 0.4;
+const MUSIC_FADE_OUT = 1.2;
+
 /** Where the preference is kept between visits. */
 const STORAGE_KEY = "tetra-do:sound";
+
+/** Where the tune's own switch is kept: the effects can stay on with the tune off. */
+const MUSIC_STORAGE_KEY = "tetra-do:music";
 
 /** One note, as the synth takes it. */
 interface Note {
@@ -58,11 +72,17 @@ function pitch(step: number): number {
 class Sound {
   #context: AudioContext | null = null;
   #enabled = true;
+  #musicEnabled = true;
   #loaded = false;
   /** The listeners waiting for a gesture to start the context with, while one is waiting. */
   #waiting: AbortController | null = null;
   /** Who wants telling when {@link Sound.blocked} changes. */
   #listeners = new Set<() => void>();
+  /** The tune's player, on the same context as everything else, made the first time it is asked for. */
+  #music: GameAudio | null = null;
+  #theme: Track | null = null;
+  /** Whether the game wants the tune on, which the switch can overrule but does not forget. */
+  #musicWanted = false;
 
   /** Whether sounds play. Read on every call, so toggling is immediate. */
   get enabled(): boolean {
@@ -77,12 +97,16 @@ class Sound {
    * has touched. One touch anywhere clears it.
    */
   get blocked(): boolean {
-    return this.enabled && this.#context?.state === "suspended";
+    if (!this.enabled || this.#context?.state !== "suspended") return false;
+    // A context made inside a touch still reads "suspended" until the browser gets round to
+    // starting it, a moment later. That moment is not a page waiting to be touched — the touch
+    // has happened — and saying otherwise flashes the wrong label at the player.
+    return !(globalThis.navigator?.userActivation?.isActive ?? false);
   }
 
   /**
-   * Called when the browser lets the sound out, so a button that says otherwise can stop saying
-   * it. Nothing else here changes without the caller knowing.
+   * Called whenever the browser starts or stops the sound, so a button that reads
+   * {@link Sound.blocked} stays true to it. Nothing else here changes without the caller knowing.
    *
    * @param listener What to run
    * @returns The way to stop listening
@@ -104,7 +128,34 @@ class Sound {
       // A browser with storage blocked still gets the toggle, just not the memory of it.
     }
     if (this.#enabled) this.step(0);
+    this.#syncMusic();
     return this.#enabled;
+  }
+
+  /**
+   * Whether the tune plays under a round. Its own switch, because the effects say what the trace
+   * is doing and the tune says nothing — a player who wants quiet usually wants only the tune gone.
+   * The sound switch still silences both.
+   */
+  get musicEnabled(): boolean {
+    this.#load();
+    return this.#musicEnabled;
+  }
+
+  /** Turns the tune on or off, and remembers which. */
+  toggleMusic(): boolean {
+    this.#load();
+    this.#musicEnabled = !this.#musicEnabled;
+    try {
+      localStorage.setItem(
+        MUSIC_STORAGE_KEY,
+        this.#musicEnabled ? "on" : "off",
+      );
+    } catch {
+      // As with the sound switch: the toggle works, the memory of it does not.
+    }
+    this.#syncMusic();
+    return this.#musicEnabled;
   }
 
   #load(): void {
@@ -112,8 +163,10 @@ class Sound {
     this.#loaded = true;
     try {
       this.#enabled = localStorage.getItem(STORAGE_KEY) !== "off";
+      this.#musicEnabled = localStorage.getItem(MUSIC_STORAGE_KEY) !== "off";
     } catch {
       this.#enabled = true;
+      this.#musicEnabled = true;
     }
   }
 
@@ -126,7 +179,19 @@ class Sound {
   #ctx(): AudioContext | null {
     if (!this.enabled) return null;
     if (typeof AudioContext === "undefined") return null;
-    this.#context ??= new AudioContext();
+    if (this.#context === null) {
+      this.#context = new AudioContext();
+      // Whatever starts or stops the context — a touch, the browser getting round to it, the tab
+      // being hidden — the button that reads `blocked` hears about it here, rather than on the
+      // game's next change, which during the count-in is three seconds away.
+      this.#context.addEventListener("statechange", () => {
+        if (this.#context?.state === "running") {
+          this.#waiting?.abort();
+          this.#waiting = null;
+        }
+        for (const listener of this.#listeners) listener();
+      });
+    }
     if (this.#context.state === "suspended") {
       void this.#context.resume();
       this.#waitForGesture();
@@ -151,12 +216,8 @@ class Sound {
     const start = (): void => {
       const context = this.#context;
       if (context === null) return;
-      void context.resume().then(() => {
-        if (context.state !== "running") return;
-        this.#waiting?.abort();
-        this.#waiting = null;
-        for (const listener of this.#listeners) listener();
-      });
+      // The context's own `statechange` stops this listening and tells the button.
+      void context.resume();
     };
 
     for (const type of ["pointerdown", "keydown", "touchend"]) {
@@ -166,6 +227,39 @@ class Sound {
         signal: this.#waiting.signal,
       });
     }
+  }
+
+  /**
+   * The tune under the round: on while one is being played or watched, off the rest of the time.
+   *
+   * Remembered rather than acted on alone, so the sound switch can take the tune away and give it
+   * back in the middle of a round. Asked for again, it starts again from the top: a new round is a
+   * new round.
+   *
+   * @param playing Whether the round wants it
+   */
+  music(playing: boolean): void {
+    this.#musicWanted = playing;
+    this.#syncMusic();
+  }
+
+  #syncMusic(): void {
+    if (!this.#musicWanted || !this.enabled || !this.musicEnabled) {
+      this.#music?.stopBgm({ fade: MUSIC_FADE_OUT });
+      return;
+    }
+    const ctx = this.#ctx();
+    if (ctx === null) return;
+    if (this.#music === null) {
+      // Handed the context rather than making its own: one context is one thing for the browser to
+      // unlock, and the effects and the tune share the same switch.
+      this.#music = new GameAudio({ context: ctx });
+      this.#music.setVolume("bgm", MUSIC_LEVEL);
+    }
+    // Rendered once, on the first round, and kept: it is a tenth of a second of arithmetic, and the
+    // lead-in is there to hide it.
+    this.#theme ??= this.#music.compose(THEME, INSTRUMENTS);
+    this.#music.playBgm(this.#theme, { fade: MUSIC_FADE_IN, restart: true });
   }
 
   /** Plays a handful of notes. Each is an oscillator and an envelope, and nothing else. */

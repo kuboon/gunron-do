@@ -72,6 +72,25 @@ export const TetraControls = clientEntry(
               : "音なし"}
           </button>
 
+          {
+            /*
+            The tune has its own switch, beside the one that silences everything. With the sound
+            off there is no tune to switch, so it says so by being unavailable rather than by lying.
+          */
+          }
+          <button
+            type="button"
+            disabled={!sound.enabled}
+            aria-pressed={sound.musicEnabled ? "true" : "false"}
+            aria-label={sound.musicEnabled ? "BGM を消す" : "BGM を流す"}
+            mix={buttonMix(sound.enabled && sound.musicEnabled, () => {
+              sound.toggleMusic();
+              handle.update();
+            })}
+          >
+            {sound.musicEnabled ? "BGMあり" : "BGMなし"}
+          </button>
+
           {tutorial.running
             ? (
               <>

@@ -2,6 +2,7 @@
   "version": "5",
   "specifiers": {
     "jsr:@deno/loader@0.5": "0.5.0",
+    "jsr:@kuboon/bgm@0.1": "0.1.0",
     "jsr:@kuboon/game-center-sdk@0.4": "0.4.0",
     "jsr:@kuboon/md@0.7": "0.7.0",
     "jsr:@kuboon/share-element@0.5": "0.5.0",
@@ -45,6 +46,9 @@
   "jsr": {
     "@deno/loader@0.5.0": {
       "integrity": "a6d94408de5e6bacac404f8f6963c8b8cc278cfd1a878aa2f06b34a083d6bfee"
+    },
+    "@kuboon/bgm@0.1.0": {
+      "integrity": "7d13eb328cfabe7d9510987c2a51db1859b4ffb15df0bb9939d06e541b67b610"
     },
     "@kuboon/game-center-sdk@0.4.0": {
       "integrity": "9da9a77ab8e25a07aeb0ec70c2ebf9a638db60b4fae0c26407386edbd6bc1390"
@@ -1782,6 +1786,7 @@
   },
   "workspace": {
     "dependencies": [
+      "jsr:@kuboon/bgm@0.1",
       "jsr:@kuboon/game-center-sdk@0.4",
       "jsr:@kuboon/md@0.7",
       "jsr:@kuboon/share-element@0.5",

@@ -50,6 +50,8 @@ export interface Noises {
   cancel(): void;
   tick(seconds: number): void;
   over(): void;
+  /** The tune under the round, on or off. */
+  music(playing: boolean): void;
 }
 
 /** The noises, with nobody listening. */
@@ -61,6 +63,7 @@ const SILENCE: Noises = {
   cancel() {},
   tick() {},
   over() {},
+  music() {},
 };
 
 /** The board is square, and small enough that every cell is in reach of a thumb. */
@@ -345,6 +348,7 @@ export class TetraDo {
         this.#phase = "over";
         this.#path = [];
         this.#noises.over();
+        this.#noises.music(false);
         this.#emit();
       }
       this.#advance(dt);
@@ -530,6 +534,7 @@ export class TetraDo {
    */
   start(date: string): void {
     this.#begin(date);
+    this.#noises.music(true);
     this.#emit();
   }
 
@@ -547,6 +552,7 @@ export class TetraDo {
     this.#begin(date);
     this.#replaying = true;
     this.#pending = [...moves];
+    this.#noises.music(true);
     this.#emit();
   }
 
@@ -579,6 +585,7 @@ export class TetraDo {
     this.#hitStop = 0;
     this.#due = [];
     this.#resetSolid();
+    this.#noises.music(false);
     this.#phase = "teaching";
     this.#emit();
   }
@@ -608,6 +615,7 @@ export class TetraDo {
    */
   preview(date: string): void {
     this.#begin(date);
+    this.#noises.music(false);
     this.#phase = "ready";
     this.#emit();
   }
@@ -623,6 +631,7 @@ export class TetraDo {
   setPaused(paused: boolean): void {
     if (!this.#replaying) return;
     this.#paused = paused;
+    this.#noises.music(!paused);
     this.#emit();
   }
 
