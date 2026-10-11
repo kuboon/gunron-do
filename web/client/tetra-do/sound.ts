@@ -325,9 +325,31 @@ class Sound {
   }
 
   /**
-   * A trace that came home: an arpeggio as long as the trace, over a thump.
+   * A trace that came home and was marked: two notes up the ladder, from where the trace got to.
    *
-   * @param length The reduced length — what the trace scored on
+   * Lighter than a clear, because nothing has gone yet — the board has only been told what to
+   * take when the button is held. A road of nothing but cancellations gets the bottom rung.
+   *
+   * @param length The road's reduced length
+   */
+  mark(length: number): void {
+    const top = Math.max(0, length - 1);
+    this.#play([
+      { freq: pitch(top), duration: 0.09, gain: 0.45, type: "triangle" },
+      {
+        freq: pitch(top + 2),
+        delay: 0.07,
+        duration: 0.16,
+        gain: 0.4,
+        type: "sine",
+      },
+    ]);
+  }
+
+  /**
+   * Every marked road going at once: an arpeggio as long as the haul, over a thump.
+   *
+   * @param length The reduced length — what the roads scored on
    */
   clear(length: number): void {
     const notes: Note[] = [{

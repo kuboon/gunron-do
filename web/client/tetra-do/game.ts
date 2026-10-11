@@ -2,7 +2,8 @@
  * The game itself: one object, three islands reading it.
  *
  * The board, the trace, the clock and the solid's orientation are one state — a cell you touch
- * turns the solid, the turn that lands home clears the cell, and clearing it moves the clock — so
+ * turns the solid, the turn that lands home marks the road, the button clears it, and clearing it
+ * moves the clock — so
  * they live together here rather than in whichever island happens to draw them. What the islands
  * get is a view of it and two ways to be told it changed: {@link TetraDo.subscribe} for the moves,
  * and {@link TetraDo.onFrame} for the animation, which is the difference between re-rendering
@@ -45,6 +46,8 @@ import { sound } from "./sound.ts";
 export interface Noises {
   step(depth: number): void;
   back(depth: number): void;
+  /** A road marked on the board, waiting for the clear. */
+  mark(length: number): void;
   clear(length: number): void;
   swap(): void;
   cancel(): void;
@@ -58,6 +61,7 @@ export interface Noises {
 const SILENCE: Noises = {
   step() {},
   back() {},
+  mark() {},
   clear() {},
   swap() {},
   cancel() {},
@@ -75,6 +79,15 @@ export const ROUND_MS = 60_000;
 
 /** Three, two, one: the pause between pressing start and the clock starting. */
 export const LEAD_IN_MS = 3_000;
+
+/**
+ * How long the clear button has to be held before every marked road goes.
+ *
+ * Long enough that clearing is a decision rather than a reflex: two seconds of the round's sixty,
+ * spent once for however many roads are marked. A player who clears after every `a a a` pays it
+ * every time; one who marks four roads and clears them together pays it once.
+ */
+export const CLEAR_HOLD_MS = 2_000;
 
 /** Where the time bar starts reading as nearly over. */
 export const LOW_TIME_MS = 15_000;
@@ -157,6 +170,27 @@ export interface Cell {
   op: Op;
 }
 
+/**
+ * A trace that came home and was let go: marked on the board, not yet cleared.
+ *
+ * Its cells stay where they are and stay playable. A later trace may run over them, and the road
+ * it overwrote is no longer the road that came home — so when the later one is marked, the earlier
+ * one is unmarked. The ids are kept beside the positions for the same reason: a road whose cells
+ * have moved under it, by a swap or by the board closing over a clear, is not a road any more.
+ */
+export interface Road {
+  /** New with every road, so the board can key it. */
+  id: number;
+  /** The cells, in the order they were traced. The first is where it starts. */
+  path: readonly number[];
+  /** The identity of the cell at each of those positions when it was marked. */
+  ids: readonly number[];
+  /** Its length with the cancellations taken out: what it scores. */
+  reduced: number;
+  /** How many times it came home along the way: its combo. */
+  closings: number;
+}
+
 type Listener = () => void;
 
 /** A queued piece of the solid's animation: a turn to make, or a flash to show. */
@@ -231,6 +265,13 @@ export class TetraDo {
   #nextId = 0;
   #path: number[] = [];
   #popping = new Set<number>();
+  /** The roads marked and waiting for the clear, oldest first. */
+  #roads: Road[] = [];
+  #roadId = 0;
+  /** Whether the clear button is down. */
+  #holding = false;
+  /** How long it has been down, in game time. */
+  #charge = 0;
 
   /** How many cells have been taken off the board by a trace that counted. */
   #cleared = 0;
@@ -337,16 +378,22 @@ export class TetraDo {
     } else if (this.#phase === "teaching") {
       // Everything the board does, none of what the clock does. A lesson cannot run out.
       this.#settle(dt);
+      this.#fillGauge(dt);
       this.#advance(dt);
     } else if (this.#phase === "playing") {
       this.#settle(dt);
       this.#timeLeft -= dt;
       this.#countdown();
+      // Before the playback, so a press delivered this step starts filling on the next one — the
+      // same as a press made between two frames of a round being played.
+      this.#fillGauge(dt);
       if (this.#replaying) this.#playback();
       if (this.#timeLeft <= 0) {
         this.#timeLeft = 0;
         this.#phase = "over";
         this.#path = [];
+        this.#holding = false;
+        this.#charge = 0;
         this.#noises.over();
         this.#noises.music(false);
         this.#emit();
@@ -504,6 +551,18 @@ export class TetraDo {
   get popping(): ReadonlySet<number> {
     return this.#popping;
   }
+  /** The roads marked and waiting for the clear. */
+  get roads(): readonly Road[] {
+    return this.#roads;
+  }
+  /** How full the clear button's gauge is: `0` to `1`. Read per frame. */
+  get gauge(): number {
+    return Math.min(1, this.#charge / CLEAR_HOLD_MS);
+  }
+  /** Whether the clear button is being held. */
+  get holding(): boolean {
+    return this.#holding;
+  }
   /** Where the solid is drawn right now — part-way through a turn, most of the time. */
   get orientation(): Quat {
     return this.#shown;
@@ -574,6 +633,9 @@ export class TetraDo {
     this.#random = mulberry32(hash("practice"));
     this.#cells = ops.map((op) => ({ id: this.#nextId++, op }));
     this.#path = [];
+    this.#roads = [];
+    this.#holding = false;
+    this.#charge = 0;
     this.#hint = [];
     this.#cleared = 0;
     this.#solved = 0;
@@ -645,6 +707,9 @@ export class TetraDo {
     this.#cells = [];
     this.#fill();
     this.#path = [];
+    this.#roads = [];
+    this.#holding = false;
+    this.#charge = 0;
     this.#cleared = 0;
     this.#combo = 0;
     this.#solved = 0;
@@ -693,13 +758,8 @@ export class TetraDo {
         case "end":
           this.#endTrace();
           break;
-        case "erase":
-          this.#erase(move.value);
-          break;
-        case "live":
-          // Retired: the solid always turns under the finger now. Recordings made before that
-          // still carry the setting, and they still play — it only ever changed the animation,
-          // never what the trace was worth.
+        case "hold":
+          this.#hold(move.value === 1);
           break;
       }
     }
@@ -767,6 +827,23 @@ export class TetraDo {
       this.#leaving(index)
     ) return;
 
+    // Home, and the next cell is where a marked road starts: the two become one road. The trace
+    // is a way home and so is the road, and a way home followed by a way home is a way home — so
+    // nothing has to be traced again, and the finger's work is done. The trace ends here, the
+    // rest of the gesture is ignored, and what is marked is both of them as one.
+    const joined = this.#roads.find((road) => road.path[0] === index);
+    if (
+      joined !== undefined && isRoad(this.word) &&
+      !joined.path.some((cell) => this.#path.includes(cell))
+    ) {
+      const path = [...this.#path, ...joined.path];
+      if (isRoad(path.map((cell) => this.#cells[cell].op))) {
+        this.#roads = this.#roads.filter((road) => road !== joined);
+        this.#mark(path);
+        return;
+      }
+    }
+
     // Where the line stops, the trace stops. A stretch that has spent the allowance cannot spend
     // its way out of it — no move it makes from here can bring it home inside six — so the trace
     // takes none, and the only way on is the way back. Letting it grow instead would grow it
@@ -821,25 +898,11 @@ export class TetraDo {
       return;
     }
 
-    const reduced = traceLength(word);
-
-    // Nothing but cancellations: `a a⁻¹ b b⁻¹`, or more pairs in a row. It comes home because it
-    // never went anywhere, so it is not an answer and counts as nothing — but it is allowed to
-    // take those cells off the board. Four cells at least, now that two are a swap: a pair is
-    // what cancels, and one pair is a swap.
-    if (reduced === 0) {
-      this.#undo();
-      return;
-    }
-
-    // Home, long enough to be an answer, and closed often enough along the way. The last of the
-    // three is what keeps length worth something: see `MAX_OPEN`.
-    const links = chain(word);
-    if (
-      isIdentity(compose(word)) && reduced >= MIN_REDUCED_LENGTH &&
-      !links.broken
-    ) {
-      this.#solve(reduced, links.closings);
+    // Home, and either long enough to be an answer or nothing but cancellations — the second
+    // scores nothing, but is still allowed to take its cells off the board when the roads go.
+    // Either way it is marked rather than cleared: the clear is the button's.
+    if (isRoad(word)) {
+      this.#mark(this.#path);
       return;
     }
 
@@ -855,57 +918,121 @@ export class TetraDo {
   }
 
   /**
-   * A trace that came home, and everything that goes off at once because it did.
+   * A trace that came home, marked on the board to be cleared later.
+   *
+   * Any road it ran over is unmarked: a road with a cell of it traced again by another is a road
+   * that has been overwritten, and only the newer of the two is what the player meant.
+   *
+   * @param path The cells, in the order they were traced
+   */
+  #mark(path: readonly number[]): void {
+    const word = path.map((index) => this.#cells[index].op);
+    const reduced = traceLength(word);
+    const taken = new Set(path);
+    this.#roads = this.#roads.filter((road) =>
+      !road.path.some((index) => taken.has(index))
+    );
+    this.#roads.push({
+      id: ++this.#roadId,
+      path: [...path],
+      ids: path.map((index) => this.#cells[index].id),
+      reduced,
+      closings: chain(word).closings,
+    });
+    this.#path = [];
+    this.#noises.mark(reduced);
+    this.#emit();
+  }
+
+  /**
+   * Presses or lets go of the clear button.
+   *
+   * @param on Whether it is down
+   */
+  holdClear(on: boolean): void {
+    // Not written while nothing can happen: a press in the count-in would otherwise be replayed
+    // as a press at the first moment of the round.
+    if (this.#replaying || !this.#live()) return;
+    this.#write("hold", on ? 1 : 0);
+    this.#hold(on);
+  }
+
+  #hold(on: boolean): void {
+    if (!this.#live()) return;
+    this.#holding = on && this.#roads.length > 0;
+    this.#charge = 0;
+    this.#emit();
+  }
+
+  /** Runs the clear button's gauge on the game's clock, and clears when it is full. */
+  #fillGauge(dt: number): void {
+    if (!this.#holding) return;
+    if (this.#roads.length === 0) {
+      this.#holding = false;
+      this.#charge = 0;
+      this.#emit();
+      return;
+    }
+    this.#charge += dt;
+    if (this.#charge < CLEAR_HOLD_MS) return;
+    // Full. The button has to come up and go down again before it fills a second time, so a
+    // finger left on it does not clear every road the moment the next one is marked.
+    this.#holding = false;
+    this.#charge = 0;
+    this.#clearRoads();
+  }
+
+  /**
+   * Every marked road, gone at once, and everything that goes off because they did.
    *
    * Seven things, inside a tenth of a second: the score jumps, the cells shrink, sparks come off
    * them, the board takes a knock, the floor flashes under the solid, the game holds still for a
-   * moment, and the arpeggio runs. None of them is much on its own; together they are the reason
-   * to look for a long trace rather than three short ones — which is also why every one of them
-   * is bigger for a long trace than a short one.
-   *
-   * @param reduced The trace's length once the cancellations are out: what it scored on
+   * moment, and the arpeggio runs. Each road scores what it did before the clear was a button —
+   * its reduced length, and one answer per time it came home — and the bigger the haul, the
+   * bigger the fuss.
    */
-  /**
-   * A trace that came home.
-   *
-   * What it counts for is its reduced length: the cancelling pairs inside it did nothing, so
-   * they add nothing. Padding a trace with `a a⁻¹` walks the same answer the long way round,
-   * and the long way round is worth what the short way was.
-   *
-   * @param reduced The trace's length with the cancellations taken out
-   */
-  #solve(reduced: number, closings: number): void {
-    // A pass made of more than one answer earns the full treatment whatever its length: chaining
-    // is the thing the game now asks for, so it is the thing the board should shout about.
-    const tier = closings >= 2 || reduced >= LARGE_CLEAR ? "large" : "medium";
-    const record = closings > this.#combo;
+  #clearRoads(): void {
+    const roads = this.#roads;
+    this.#roads = [];
+    if (roads.length === 0) return;
 
-    // Each answer counts, not each pass. A fourteen-cell trace that came home four times on the
-    // way is four answers taken in one go, and saying "1" would be counting the gesture rather
-    // than what it did.
+    // A trace in progress is over cells that are about to move. It goes; the roads are what was
+    // asked for.
+    if (this.#path.length > 0) {
+      this.#path = [];
+      this.#rightSolid();
+    }
+
+    const reduced = roads.reduce((sum, road) => sum + road.reduced, 0);
+    const closings = roads.reduce((sum, road) => sum + road.closings, 0);
+    const best = Math.max(...roads.map((road) => road.closings));
+    const tier = roads.length >= 2 || best >= 2 || reduced >= LARGE_CLEAR
+      ? "large"
+      : "medium";
+    const record = best > this.#combo;
+
+    // Each answer counts, not each road. A fourteen-cell road that came home four times on the
+    // way is four answers, and saying "1" would be counting the gesture rather than what it did.
     this.#solved += closings;
     this.#cleared += reduced;
-    this.#combo = Math.max(this.#combo, closings);
+    this.#combo = Math.max(this.#combo, best);
     this.#clearedPop = this.#pop(`+${reduced}`);
     // An arrow rather than the bare number: beside a number that already says `4`, a floating
     // `4` reads as a second count rather than as the one that just moved.
-    if (record) this.#comboPop = this.#pop(`↑${closings}`);
+    if (record) this.#comboPop = this.#pop(`↑${best}`);
     this.#queue.push({ kind: "flash" });
 
+    const cells = [...new Set(roads.flatMap((road) => road.path))];
     this.#burst = {
       id: ++this.#effectId,
-      cells: this.#path.map((index) => ({
-        index,
-        op: this.#cells[index].op,
-      })),
+      cells: cells.map((index) => ({ index, op: this.#cells[index].op })),
       strength: tier,
     };
     this.#knock(tier);
     this.#hitStop = HIT_STOP_MS[tier];
-    this.#noises.clear(reduced);
+    this.#noises.clear(Math.max(2, reduced));
 
-    this.#take(this.#path);
-    this.#path = [];
+    this.#take(cells);
     this.#emit();
 
     const burstId = this.#burst.id;
@@ -915,46 +1042,6 @@ export class TetraDo {
       this.#burst = null;
       this.#emit();
     });
-  }
-
-  /**
-   * Cells that undo each other, taken off the board without ceremony.
-   *
-   * It counts for nothing — not the cells, not a trace that came home. The pair was never worth
-   * anything; being allowed to clear it is the whole of what it gets.
-   */
-  #undo(): void {
-    this.#noises.clear(2);
-    this.#take(this.#path);
-    this.#path = [];
-    this.#emit();
-  }
-
-  /**
-   * One cell, gone, because the player asked twice.
-   *
-   * It counts for nothing at all: not the cells, not the length, not a trace that came home. It
-   * is a way of clearing a cell that is in the way, and the cost is the time it takes.
-   *
-   * @param index The cell to take
-   */
-  /**
-   * Takes one cell off the board.
-   *
-   * Nothing a player can do any more: a double tap used to erase a cell, and the swap replaced it.
-   * It stays because recordings do. A link someone sent before the change still carries `erase`
-   * moves, and a replay that quietly skipped them would run every later move against a board that
-   * had drifted — the round would not be the round. What the numbers come to has already moved
-   * with the rules, which is a different and unavoidable thing; the board at least still does what
-   * it did.
-   *
-   * @param index The cell to take
-   */
-  #erase(index: number): void {
-    if (!this.#live() || this.#leaving(index)) return;
-    this.#noises.back(1);
-    this.#take([index]);
-    this.#emit();
   }
 
   /**
@@ -974,6 +1061,10 @@ export class TetraDo {
     this.#rightSolid();
     if (!this.#leaving(a) && !this.#leaving(b)) {
       [this.#cells[a], this.#cells[b]] = [this.#cells[b], this.#cells[a]];
+      // A road with a cell swapped out of it is not the road that came home.
+      this.#roads = this.#roads.filter((road) =>
+        !road.path.includes(a) && !road.path.includes(b)
+      );
       this.#noises.swap();
     }
     this.#emit();
@@ -988,6 +1079,10 @@ export class TetraDo {
     this.#later(POP_MS, () => {
       this.#collapse(removed);
       this.#popping = new Set();
+      // A road marked while these were popping may have had cells fall under it.
+      this.#roads = this.#roads.filter((road) =>
+        road.path.every((index, k) => this.#cells[index].id === road.ids[k])
+      );
       this.#emit();
     });
   }
@@ -1192,6 +1287,22 @@ export class TetraDo {
   #emit(): void {
     for (const listener of this.#listeners) listener();
   }
+}
+
+/**
+ * Whether a traced word is one that gets marked when the finger comes up.
+ *
+ * Home, closed often enough along the way (see `MAX_OPEN`), and either long enough to be an answer
+ * or nothing but cancellations — `a a⁻¹ b b⁻¹` comes home because it never went anywhere, and it
+ * scores nothing, but it is still allowed to take its cells with it when the roads are cleared.
+ * Four cells at least for that one: two are a swap.
+ */
+export function isRoad(word: readonly Op[]): boolean {
+  if (word.length < 3 || !isIdentity(compose(word)) || chain(word).broken) {
+    return false;
+  }
+  const reduced = traceLength(word);
+  return reduced >= MIN_REDUCED_LENGTH || (reduced === 0 && word.length >= 4);
 }
 
 /** Whether two cells share an edge. Traces go along edges, never through a corner. */

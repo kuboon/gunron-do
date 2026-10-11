@@ -24,6 +24,12 @@
  * colour, ending where the allowance ran out — which is the difference between telling a player
  * their trace is dead and telling them where they killed it.
  *
+ * A trace that came home is marked rather than cleared, and a marked road is drawn in the good
+ * colour and stays until the clear button takes it. Both kinds of line say where they start and
+ * where they end — a ring at the first cell, an arrowhead at the last — because a road can be
+ * joined onto at its start, and a player has to be able to see which end that is. A road the
+ * trace in progress has run over is faded: it will be unmarked when this one is.
+ *
  * What it reads is the game; what it writes is three calls on it. No rule is decided here.
  */
 
@@ -139,6 +145,18 @@ export const TetraBoard = clientEntry(
       // a trace that is all cancellation looks like what it is before the finger comes up.
       const { cancelled } = traceReduction(game.word);
 
+      const roads = game.roads;
+      const traced = new Set(path);
+      // Roads the trace in progress has run over: unmarked if it is marked, so drawn as going.
+      const doomed = new Set(
+        roads.filter((road) => road.path.some((index) => traced.has(index)))
+          .map((road) => road.id),
+      );
+      const marked = new Map<number, boolean>();
+      for (const road of roads) {
+        for (const index of road.path) marked.set(index, doomed.has(road.id));
+      }
+
       const broken = game.broken;
       const overrun = game.overrun;
       const shake = game.shake;
@@ -211,6 +229,7 @@ export const TetraBoard = clientEntry(
                     popping.has(cell.id),
                     path.indexOf(index),
                     cancelled,
+                    marked.get(index),
                   )}
                 >
                   {cellGlyph(cell.op)}
@@ -239,7 +258,8 @@ export const TetraBoard = clientEntry(
             />
           )}
 
-          {(path.length >= 2 || burst !== null) && width > 0
+          {(path.length >= 2 || roads.length > 0 || burst !== null) &&
+              width > 0
             ? (
               <svg
                 mix={lineStyle}
@@ -251,6 +271,41 @@ export const TetraBoard = clientEntry(
                   : burst.cells.flatMap((cell) =>
                     sparks(cell, burst, center(cell.index), cellSize())
                   )}
+                {roads.flatMap((road) => {
+                  const going = doomed.has(road.id);
+                  const { cancelled: struck } = traceReduction(
+                    road.path.map((index) => game.cells[index].op),
+                  );
+                  const opacity = going ? 0.25 : 0.75;
+                  return [
+                    ...road.path.slice(1).map((to, step) => {
+                      const [x1, y1] = center(road.path[step]);
+                      const [x2, y2] = center(to);
+                      const bridge = struck[step] && struck[step + 1];
+                      return (
+                        <line
+                          key={`road-${road.id}-${step}`}
+                          x1={x1}
+                          y1={y1}
+                          x2={x2}
+                          y2={y2}
+                          stroke={ink.good}
+                          stroke-opacity={bridge ? opacity * 0.5 : opacity}
+                          stroke-width={Math.max(3, cellSize() * 0.1) *
+                            (bridge ? 0.5 : 1)}
+                          stroke-linecap="round"
+                        />
+                      );
+                    }),
+                    ...ends(
+                      road.path.map(center),
+                      ink.good,
+                      opacity,
+                      cellSize(),
+                      `road-${road.id}`,
+                    ),
+                  ];
+                })}
                 {path.slice(1).map((to, step) => {
                   // Four things a link can be, and the line says which.
                   //
@@ -320,6 +375,15 @@ export const TetraBoard = clientEntry(
                     />
                   );
                 })}
+                {path.length >= 2
+                  ? ends(
+                    path.map(center),
+                    broken ? ink.muted : ink.text,
+                    broken ? 0.5 : 0.9,
+                    cellSize(),
+                    "trace",
+                  )
+                  : null}
               </svg>
             )
             : null}
@@ -328,6 +392,60 @@ export const TetraBoard = clientEntry(
     };
   },
 );
+
+/**
+ * Where a line starts and where it ends: a ring on the first cell, an arrowhead on the last.
+ *
+ * The arrowhead points the way the last step went, so a road reads as a direction and not only a
+ * shape — which matters, because a road can be joined onto at its start and not at its end.
+ *
+ * @param points The cells' centres, in trace order
+ * @param color The line's colour
+ * @param opacity The line's opacity
+ * @param size The width of a cell
+ * @param key What to key the two marks by
+ */
+function ends(
+  points: readonly [number, number][],
+  color: string,
+  opacity: number,
+  size: number,
+  key: string,
+) {
+  const [sx, sy] = points[0];
+  const [ex, ey] = points[points.length - 1];
+  const [px, py] = points[points.length - 2];
+  const run = Math.hypot(ex - px, ey - py) || 1;
+  const [ux, uy] = [(ex - px) / run, (ey - py) / run];
+  const reach = size * 0.2;
+  const tip = [ex + ux * reach, ey + uy * reach];
+  const back = [ex - ux * reach * 0.6, ey - uy * reach * 0.6];
+  const wing = size * 0.17;
+  const arrow = [
+    tip,
+    [back[0] - uy * wing, back[1] + ux * wing],
+    [back[0] + uy * wing, back[1] - ux * wing],
+  ].map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+
+  return [
+    <circle
+      key={`${key}-start`}
+      cx={sx}
+      cy={sy}
+      r={(size * 0.2).toFixed(2)}
+      fill="none"
+      stroke={color}
+      stroke-opacity={opacity}
+      stroke-width={Math.max(2.5, size * 0.07).toFixed(2)}
+    />,
+    <polygon
+      key={`${key}-end`}
+      points={arrow}
+      fill={color}
+      fill-opacity={opacity}
+    />,
+  ];
+}
 
 /**
  * What comes off one cleared cell: a ring, and a handful of sparks in the cell's own colour.
@@ -405,14 +523,20 @@ const SPARKS = { medium: 10, large: 16 } as const;
  * @param leaving Whether the cell is mid-clear
  * @param step Where the cell sits in the trace, or `-1` when it is not in it
  * @param cancelled One flag per step of the trace
+ * @param marked Whether the cell is on a marked road — `true` if that road is about to be
+ *   unmarked by the trace in progress, `false` if not, `undefined` if it is on no road
  */
 function faceMix(
   leaving: boolean,
   step: number,
   cancelled: readonly boolean[],
+  marked: boolean | undefined,
 ) {
   if (leaving) return [faceStyle, facePoppingStyle];
-  if (step < 0) return [faceStyle];
+  if (step < 0) {
+    if (marked === false) return [faceStyle, faceMarkedStyle];
+    return [faceStyle];
+  }
   return cancelled[step]
     ? [faceStyle, faceCancelledStyle]
     : [faceStyle, faceTracedStyle];
@@ -578,6 +702,12 @@ const faceCancelledStyle = css({
   // and the link across it say one thing rather than two.
   boxShadow: `inset 0 0 0 2px ${ink.muted}`,
   opacity: 0.8,
+});
+
+/** On a marked road: lit from inside in the road's colour, waiting for the clear. */
+const faceMarkedStyle = css({
+  boxShadow: `inset 0 0 0 2px ${ink.good}`,
+  background: surface.cellActive,
 });
 
 /** Cleared, and shrinking away in the slot it still holds. */

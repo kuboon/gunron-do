@@ -1,8 +1,9 @@
 /**
  * テトラ道 — the game, with the screen to itself.
  *
- * The page is a layout and six islands: the solid, the clock, the board, the panel that covers
- * the board between rounds, the buttons, and the label saying which board this is. Nothing
+ * The page is a layout and seven islands: the solid, the clock, the clear button, the board, the
+ * panel that covers the board between rounds, the buttons, and the label saying which board this
+ * is. Nothing
  * of the game is decided here; the modules beside this file hold the rules and the islands read
  * them, which is what lets this file be the one place that says where each part goes.
  *
@@ -22,6 +23,7 @@ import { css, type RemixNode } from "@remix-run/ui";
 
 import { TetraBoard } from "./islands/tetra-board.tsx";
 import { TetraControls } from "./islands/tetra-controls.tsx";
+import { TetraGauge } from "./islands/tetra-gauge.tsx";
 import { TetraHud } from "./islands/tetra-hud.tsx";
 import { TetraSeed } from "./islands/tetra-seed.tsx";
 import { TetraPanel } from "./islands/tetra-panel.tsx";
@@ -90,6 +92,9 @@ export default function TetraDoPage(): RemixNode {
       <div mix={solidAreaStyle}>
         <TetraSolid />
       </div>
+      <div mix={gaugeAreaStyle}>
+        <TetraGauge />
+      </div>
       <div mix={boardAreaStyle}>
         <TetraBoard />
       </div>
@@ -146,14 +151,14 @@ const screenStyle = css({
   ":where(&) :where(*)": { touchAction: "manipulation" },
   fontFamily:
     '"Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif',
-  gridTemplateAreas: `"head" "hud" "solid" "board" "controls" "nav"`,
+  gridTemplateAreas: `"head" "hud" "solid" "gauge" "board" "controls" "nav"`,
 
   "@media (min-width: 52rem)": {
     width: "min(96vw, 56rem)",
     gridTemplateColumns: "1fr 27rem",
     columnGap: "2rem",
     gridTemplateAreas:
-      `"head head" "solid hud" "solid board" "solid controls" "solid nav"`,
+      `"head head" "solid hud" "solid gauge" "solid board" "solid controls" "solid nav"`,
   },
 });
 
@@ -187,6 +192,8 @@ const linkStyle = css({
 });
 
 const hudAreaStyle = css({ gridArea: "hud" });
+/** Between the solid and the board: the clear button, where both hands can reach it. */
+const gaugeAreaStyle = css({ gridArea: "gauge" });
 const boardAreaStyle = css({ gridArea: "board" });
 
 /** Over the board, and only the board. Empty and untouchable when there is no panel up. */

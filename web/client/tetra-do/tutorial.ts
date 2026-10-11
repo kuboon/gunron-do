@@ -1,5 +1,5 @@
 /**
- * The walkthrough: six things to do on a board built to show them.
+ * The walkthrough: seven things to do on a board built to show them.
  *
  * It was five pages of prose once, and prose turned out to be the wrong medium for it. Nothing
  * written down conveys *the solid turns as your finger moves and the path vanishes when it comes
@@ -12,18 +12,19 @@
  * cancelling pair sitting between two ways home. Naming the board is what lets each closing line
  * say what the player just watched rather than what the rules say in general.
  *
- * The six are two lessons. The first pair is the swap and what it is for — two cells change
+ * The first six are two lessons. The first pair is the swap and what it is for — two cells change
  * places, and the three above turn into a way home. The other four are a single gesture along one
  * route, because that is the only way to show the last three at all: the rule broken and the line
  * stopping, the same trace rescued by backing off one cell and going the other way, and then a
  * bridge and a second way home without the finger ever coming up. Between them they say what
- * counts, what does not, and what a combo is made of.
+ * counts, what does not, and what a combo is made of. The seventh is the clear button, which takes
+ * both of the roads the lessons marked.
  *
  * Those four steps point at the route *from its start*, not at the piece still to be traced. A
  * player who lifts halfway through has to begin again, and the numbers on the board are what tell
  * them where from.
  *
- * A step waits for the board, or for the trace. Clearing and swapping change the board, so those
+ * A step waits for the board, or for the trace. Marking and swapping change the board, so those
  * steps watch it; the middle of the gesture changes nothing until it ends, so those steps watch
  * where the finger has been. Neither asks *how*, which is what keeps this file from being a
  * second copy of the rules.
@@ -41,12 +42,13 @@ const STORAGE_KEY = "tetra-do:tutorial";
 /**
  * What a step is waiting to see happen to the cells it pointed at.
  *
- * `gone` is a trace that cleared them, `moved` a swap, and `traced` the finger simply having been
- * over all of them — which is the one the middle of the lesson needs, because those steps happen
- * inside a single gesture and the board does not change until it ends.
+ * `marked` is a trace that came home over them and was let go, `moved` a swap, and `traced` the
+ * finger simply having been over all of them — which is the one the middle of the lesson needs,
+ * because those steps happen inside a single gesture and the board does not change until it ends.
+ * `cleared` is the clear button having taken something off the board, whatever it was.
  */
 interface Awaiting {
-  kind: "gone" | "moved" | "traced";
+  kind: "marked" | "moved" | "traced" | "cleared";
   /** The cells pointed at, by their own identity rather than by where they are. */
   ids: number[];
   /** Where each of them was when the step began. */
@@ -70,9 +72,8 @@ const Ci: Op = 5;
  * Arranged, not dealt, and laid out as two lessons that keep out of each other's way.
  *
  * The top-left three cells are the first two steps: `a c b`, which is not a way home, until the
- * swap makes it `a b c`, which is. Clearing them takes the top off three columns, and a column
- * with its top taken off keeps every cell below where it was — so the rest of the board is
- * exactly where the rest of the lesson left it.
+ * swap makes it `a b c`, which is. Marking them moves nothing, so the rest of the board is exactly
+ * where the rest of the lesson left it.
  *
  * The rest is one route, traced in one gesture, that the last four steps walk along:
  *
@@ -125,8 +126,9 @@ const STEPS: readonly Step[] = [
   },
   {
     ask: "入れ替わって、上の3マスが道になりました。なぞってみよう。",
-    done: "テトラが元の向きに戻り、道が消えました。",
-    wants: "gone",
+    done:
+      "テトラが元の向きに戻り、道に印が付きました。指を離しても、まだ消えません。",
+    wants: "marked",
     // After the swap, so the other way round from how the board above was laid out.
     cells: [0, 1, 2],
     word: [A, B, C],
@@ -156,10 +158,18 @@ const STEPS: readonly Step[] = [
   {
     ask: "そのまま最後までなぞって、指を離そう。",
     done:
-      "2回戻ったので、成立が2つ増えてコンボは2。11マスなぞって消去は9です。",
-    wants: "gone",
+      "2回戻った道なのでコンボは2。11マスのうち打ち消しを除いた9マスが消去に数えられます。",
+    wants: "marked",
     cells: ROUTE,
     word: [A, A, B, A, A, B, C, Ci, Ai, Ci, Bi],
+  },
+  {
+    ask:
+      "印の付いた道は、テトラの下のボタンを長押しすると、まとめて消えて得点になります。",
+    done: "消えました。道をいくつか溜めてから、まとめて消すのが早道です。",
+    wants: "cleared",
+    cells: [],
+    word: [],
   },
 ];
 
@@ -337,9 +347,9 @@ class Tutorial {
    * lesson has to say so rather than wait for it.
    *
    * Done and broken are told apart by the cells themselves rather than by what is in those
-   * positions now. A step that wanted them gone is done when all of them have gone and broken
-   * when any that is left has moved; a step that wanted them moved is the other way round. Either
-   * way, cells sitting where they were put still have to be holding the step — a refill can
+   * positions now. A step that wanted them marked is done when all of them are on a marked road
+   * and broken when any of them has moved or gone; a step that wanted them moved is done when
+   * they have. Either way, cells sitting where they were put still have to be holding the step — a refill can
    * deal the very move the lesson wanted back into the place it came from.
    */
   #judge(waiting: Awaiting): Standing {
@@ -352,14 +362,24 @@ class Tutorial {
       return this.#holds(STEPS[this.#at]) ? "waiting" : "broken";
     }
 
+    // The button's step asks the score: anything at all cleared is the button having been held.
+    if (waiting.kind === "cleared") {
+      return game.cleared > 0 ? "done" : "waiting";
+    }
+
     const where = waiting.ids.map((id) =>
       game.cells.findIndex((cell) => cell.id === id)
     );
     const moved = where.some((index, i) => index !== waiting.at[i]);
 
-    if (waiting.kind === "gone") {
-      if (where.every((index) => index < 0)) return "done";
-      if (moved) return "broken";
+    if (waiting.kind === "marked") {
+      if (where.some((index) => index < 0) || moved) return "broken";
+      const roads = game.roads;
+      if (
+        waiting.at.every((index) =>
+          roads.some((road) => road.path.includes(index))
+        )
+      ) return "done";
     } else if (where.some((index) => index < 0)) {
       return "broken";
     } else if (moved) {

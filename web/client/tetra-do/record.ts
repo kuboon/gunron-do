@@ -16,8 +16,16 @@
  * lands in a few hundred characters, which is a link people will paste.
  */
 
-/** What kind of thing the player did. The order is the wire format; only append to it. */
-const KINDS = ["begin", "extend", "end", "live", "erase"] as const;
+/**
+ * What kind of thing the player did. The order is the wire format; within a version, only append
+ * to it.
+ *
+ * Version 3 dropped `live` and `erase`, which nothing could do any more, and added `hold`: the
+ * clear button going down (`1`) or coming up (`0`). Clearing is a hold rather than a moment, so the
+ * recording carries the hold and the game's clock decides when it filled — which is what lets a
+ * replay show the gauge rising rather than the board simply emptying.
+ */
+const KINDS = ["begin", "extend", "end", "hold"] as const;
 
 /** One thing the player did, and when. */
 export interface Move {
@@ -25,10 +33,9 @@ export interface Move {
   at: number;
   kind: (typeof KINDS)[number];
   /**
-   * What it was done to: the cell, for `begin`, `extend` and `erase`.
+   * What it was done to: the cell, for `begin` and `extend`.
    *
-   * `end` ignores it, and `live` carries the setting itself — `1` when the solid turns under the
-   * finger, `0` when it waits for the answer.
+   * `end` ignores it, and `hold` carries the button's state — `1` pressed, `0` let go.
    */
   value: number;
 }
@@ -39,8 +46,12 @@ export interface Move {
  * 2 is the round going from ninety seconds to sixty. The bytes did not change, but what they
  * mean did: a round recorded against the longer clock would lose its last third here, and a
  * replay that quietly stops short is worse than one that says it cannot read the link.
+ *
+ * 3 is a lifted trace marking its road instead of clearing it, with the clear moved to a button.
+ * The same moves now come to a different round, so an older link is refused rather than replayed
+ * into something its player never did.
  */
-const VERSION = 2;
+const VERSION = 3;
 
 /**
  * Times are kept to a hundredth of a second, which is finer than a finger and half the bytes.
@@ -88,7 +99,7 @@ function pack(moves: readonly Move[]): Uint8Array {
     const at = Math.max(previous, Math.round(move.at / TICK_MS) * TICK_MS);
     writeVarint(out, (at - previous) / TICK_MS);
     previous = at;
-    // Three bits of kind and five of value: a cell index is 0–24, and a setting is 0 or 1.
+    // Three bits of kind and five of value: a cell index is 0–24, and a button is 0 or 1.
     out.push((KINDS.indexOf(move.kind) << 5) | (move.value & 0x1f));
   }
 
