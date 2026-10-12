@@ -274,6 +274,58 @@ function isAnswer(stretch: readonly Op[]): boolean {
 }
 
 /**
+ * The shape of one answer, by name.
+ *
+ * The names are the ones the rules page uses, so what the board shouts is what the reader can
+ * look up. A same-letter triple is the form every player finds first; it is named so the caller
+ * can leave it unsaid, and the rest are the forms worth learning.
+ *
+ * - `三連`: the same move three times — `a a a`, `b⁻¹ b⁻¹ b⁻¹`
+ * - `巡回`: the three letters once each, in cyclic order — `a b c`, `c⁻¹ b⁻¹ a⁻¹`
+ * - `半回転`: a half-turn done twice — `a b⁻¹ a b⁻¹`
+ * - `共役`: a letter made out of another by sandwiching — `a a c a⁻¹ c`
+ * - `N手`: anything else, by its reduced length
+ */
+export type Shape = "三連" | "巡回" | "半回転" | "共役" | "4手" | "5手" | "6手";
+
+/**
+ * What shape one answer is, judged on its reduced word.
+ *
+ * @param stretch The answer's moves, as traced (cancelling pairs still in)
+ */
+function shapeOf(stretch: readonly Op[]): Shape {
+  const { cancelled } = freeReduction(stretch);
+  const w = stretch.filter((_, i) => !cancelled[i]);
+  if (w.length === 3) {
+    return w[0] === w[1] && w[1] === w[2] ? "三連" : "巡回";
+  }
+  if (w.length === 4 && w[0] === w[2] && w[1] === w[3]) return "半回転";
+  if (w.length === 5) {
+    for (let i = 0; i + 2 < w.length; i++) {
+      if (w[i + 2] === opInverse(w[i]) && opBase(w[i + 1]) !== opBase(w[i])) {
+        return "共役";
+      }
+    }
+  }
+  return `${Math.min(6, Math.max(4, w.length))}手` as Shape;
+}
+
+/**
+ * The shape of every answer in a trace, in order.
+ *
+ * @param ops The moves, in trace order
+ */
+export function answerShapes(ops: readonly Op[]): Shape[] {
+  const shapes: Shape[] = [];
+  let from = 0;
+  for (const end of answerEnds(ops)) {
+    shapes.push(shapeOf(ops.slice(from, end)));
+    from = end;
+  }
+  return shapes;
+}
+
+/**
  * Where each answer in a trace ends, as positions one past its last move.
  *
  * Taken greedily from the front: an answer ends at the first move that makes it one, and the next
