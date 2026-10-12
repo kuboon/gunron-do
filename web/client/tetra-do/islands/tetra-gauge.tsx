@@ -3,12 +3,12 @@
  *
  * A button rather than the finger coming up, because a trace that clears on release is a trace a
  * player takes the moment it closes — and the moment `a a a` closes is very soon. Marking instead
- * of clearing lets the roads pile up, and the hold puts a price on cashing them in: two seconds of
+ * of clearing lets the roads pile up, and the hold puts a price on cashing them in: a second of
  * the round, paid once for however many there are.
  *
  * The gauge fills left to right on the game's clock, not this island's. It is the game that clears
  * when it is full, and a recording carries the press and the release rather than the moment of the
- * clear, so a replay shows the same gauge rising for the same two seconds.
+ * clear, so a replay shows the same gauge rising for the same second.
  *
  * Its own island for the same reason the solid is one: the fill moves every frame while it is held,
  * and the board next door should not hear about it.
@@ -81,9 +81,7 @@ export const TetraGauge = clientEntry(
             aria-hidden="true"
           />
           <span mix={labelStyle}>
-            {roads === 0
-              ? "道をなぞると、ここで消せます"
-              : `長押しで ${roads} 本の道を消す`}
+            {roads === 0 ? "道を探そう" : `長押しで ${roads} 本の道を消す`}
           </span>
         </button>
       );

@@ -181,7 +181,45 @@ Deno.test("a recorded hold replays into the same clear", () => {
   ];
   deepStrictEqual(outcome(date, moves), { cleared: 3, solved: 1, combo: 1 });
 
-  // Let go before the two seconds are up, and nothing is cleared.
-  const early = moves.with(5, { at: 2_000, kind: "hold", value: 0 });
+  // Let go before the second is up, and nothing is cleared.
+  const early = moves.with(5, { at: 1_200, kind: "hold", value: 0 });
   deepStrictEqual(outcome(date, early), { cleared: 0, solved: 0, combo: 0 });
+});
+
+Deno.test("touching down on a road's end carries it on", () => {
+  const game = board();
+  trace(game, [10, 11, 12]);
+  game.beginTrace(12);
+  deepStrictEqual(game.path, [10, 11, 12]);
+  // 17 16 15 is c c c: home again.
+  for (const cell of [17, 16, 15]) game.extendTrace(cell);
+  game.endTrace();
+  deepStrictEqual(game.roads.map((road) => road.path), [
+    [10, 11, 12, 17, 16, 15],
+  ]);
+  equal(game.roads[0].closings, 2);
+});
+
+Deno.test("carrying a road on and not coming home leaves the road", () => {
+  const game = board();
+  trace(game, [10, 11, 12]);
+  trace(game, [12, 17, 16]);
+  deepStrictEqual(game.roads.map((road) => road.path), [[10, 11, 12]]);
+});
+
+Deno.test("one cell on from a road's end is still a swap", () => {
+  const game = board();
+  trace(game, [10, 11, 12]);
+  trace(game, [12, 17]);
+  equal(game.roads.length, 0);
+  equal(game.cells[12].op, c);
+  equal(game.cells[17].op, a);
+});
+
+Deno.test("tapping a road's end changes nothing", () => {
+  const game = board();
+  trace(game, [10, 11, 12]);
+  const [road] = game.roads;
+  trace(game, [12]);
+  deepStrictEqual(game.roads, [road]);
 });

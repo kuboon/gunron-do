@@ -83,11 +83,11 @@ export const LEAD_IN_MS = 3_000;
 /**
  * How long the clear button has to be held before every marked road goes.
  *
- * Long enough that clearing is a decision rather than a reflex: two seconds of the round's sixty,
+ * Long enough that clearing is a decision rather than a reflex: a second of the round's sixty,
  * spent once for however many roads are marked. A player who clears after every `a a a` pays it
  * every time; one who marks four roads and clears them together pays it once.
  */
-export const CLEAR_HOLD_MS = 2_000;
+export const CLEAR_HOLD_MS = 1_000;
 
 /** Where the time bar starts reading as nearly over. */
 export const LOW_TIME_MS = 15_000;
@@ -268,6 +268,8 @@ export class TetraDo {
   /** The roads marked and waiting for the clear, oldest first. */
   #roads: Road[] = [];
   #roadId = 0;
+  /** How many cells of the trace in progress were a marked road it picked up, or `0`. */
+  #resumed = 0;
   /** Whether the clear button is down. */
   #holding = false;
   /** How long it has been down, in game time. */
@@ -789,7 +791,23 @@ export class TetraDo {
 
   #beginTrace(index: number): void {
     if (!this.#live() || this.#leaving(index)) return;
+
+    // Touching down on the end of a marked road picks that road up where it stopped. It is a way
+    // home already, so the solid is home and the trace carries on from its last cell; whatever
+    // comes of it is judged as the whole road. A trace that does not come home again marks
+    // nothing, and the road it started from stays as it was.
+    const resumed = this.#roads.find((road) => road.path.at(-1) === index);
+    if (resumed !== undefined) {
+      this.#path = [...resumed.path];
+      this.#resumed = resumed.path.length;
+      this.#resetSolid();
+      this.#noises.step(Math.max(0, resumed.reduced - 1));
+      this.#emit();
+      return;
+    }
+
     this.#path = [index];
+    this.#resumed = 0;
     this.#noises.step(0);
     this.#resetSolid();
     this.#turn(this.#cells[index].op, TURN_MS);
@@ -876,6 +894,24 @@ export class TetraDo {
     if (!this.#live()) return;
     const word = this.word;
     if (word.length === 0) return;
+
+    // A road picked up by its end is judged as the road it now is — with two exceptions, both so
+    // that touching a road's end does what touching any other cell does. Lifted where it was
+    // picked up, nothing has changed. Taken one cell on and not home, it is the two-cell gesture
+    // every other cell has, and it swaps.
+    if (this.#resumed > 0) {
+      const from = this.#resumed;
+      this.#resumed = 0;
+      if (this.#path.length === from) {
+        this.#path = [];
+        this.#emit();
+        return;
+      }
+      if (this.#path.length === from + 1 && !isRoad(word)) {
+        this.#swap(this.#path[from - 1], this.#path[from]);
+        return;
+      }
+    }
 
     // One cell is a touch, not a trace. Nothing to judge.
     if (word.length < 2) {
