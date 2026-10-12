@@ -144,7 +144,6 @@ export const TetraBoard = clientEntry(
       const shake = game.shake;
       const burst = game.burst;
       const hint = game.hint;
-      const shout = game.shout;
 
       return (
         <div
@@ -238,23 +237,6 @@ export const TetraBoard = clientEntry(
               key={`flash-${burst.id}`}
               mix={flashStyles[burst.strength]}
             />
-          )}
-
-          {
-            /*
-            The shout: what the clear was made of, by name, over the middle of the board. Keyed on
-            the pop so a second clear restarts it. The animation is CSS, so it runs without the
-            board re-rendering, and it ends by itself.
-          */
-          }
-          {shout === null ? null : (
-            <div
-              key={`shout-${shout.id}`}
-              mix={shoutStyle}
-              aria-live="polite"
-            >
-              {shout.text}
-            </div>
           )}
 
           {(path.length >= 2 || burst !== null) && width > 0
@@ -681,42 +663,6 @@ const flashStyles = {
     },
   }),
 } as const;
-
-/**
- * The name of what just cleared, shouted over the board.
- *
- * It lands big, holds while the sparks fly, then lifts off and fades — a pop with the HUD's
- * overshoot, drawn in the scoring colour because it is the one thing on the board that is only
- * ever good news.
- */
-const shoutStyle = css({
-  position: "absolute",
-  left: "50%",
-  top: "50%",
-  zIndex: 2,
-  fontSize: "2.1rem",
-  fontWeight: 700,
-  letterSpacing: "0.08em",
-  whiteSpace: "nowrap",
-  color: ink.good,
-  textShadow: `0 2px 12px ${surface.ink}, 0 0 2px ${surface.ink}`,
-  pointerEvents: "none",
-  "@keyframes tetra-shout": {
-    "0%": { transform: "translate(-50%, -50%) scale(0.4)", opacity: 0 },
-    "18%": { transform: "translate(-50%, -50%) scale(1.15)", opacity: 1 },
-    "30%": { transform: "translate(-50%, -50%) scale(1)", opacity: 1 },
-    "70%": { transform: "translate(-50%, -50%) scale(1)", opacity: 1 },
-    "100%": { transform: "translate(-50%, -110%) scale(1)", opacity: 0 },
-  },
-  animation: "tetra-shout 1100ms cubic-bezier(.2,.7,.3,1) forwards",
-  "@media (prefers-reduced-motion: reduce)": {
-    animation: "tetra-shout-still 1100ms linear forwards",
-    "@keyframes tetra-shout-still": {
-      "0%, 80%": { transform: "translate(-50%, -50%)", opacity: 1 },
-      "100%": { transform: "translate(-50%, -50%)", opacity: 0 },
-    },
-  },
-});
 
 /** Over the board, and out of the way of the pointer handlers underneath. */
 const lineStyle = css({
