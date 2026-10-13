@@ -65,8 +65,10 @@ Deno.test("answers are named by their shape", () => {
   deepStrictEqual(answerShapes([a, a, a]), ["三連"]);
   deepStrictEqual(answerShapes([B, B, B]), ["三連"]);
   deepStrictEqual(answerShapes([a, b, c]), ["巡回"]);
-  deepStrictEqual(answerShapes([C, B, A]), ["巡回"]);
-  deepStrictEqual(answerShapes([a, B, a, B]), ["半回転"]);
+  deepStrictEqual(answerShapes([b, c, a]), ["巡回"]);
+  deepStrictEqual(answerShapes([C, B, A]), ["逆巡回"]);
+  deepStrictEqual(answerShapes([A, C, B]), ["逆巡回"]);
+  deepStrictEqual(answerShapes([a, B, a, B]), ["クライン"]);
   // a (a c a⁻¹) c: the b of a b c made by conjugation.
   deepStrictEqual(answerShapes([a, a, c, A, c]), ["共役"]);
   // A cancelling pair inside an answer does not change its shape.

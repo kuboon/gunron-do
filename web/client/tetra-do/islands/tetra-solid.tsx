@@ -18,7 +18,7 @@ import { clientEntry, css, type Handle } from "@remix-run/ui";
 import { refuseDoubleTap } from "../../gestures.ts";
 
 import { game, URGENT_MS } from "../game.ts";
-import { ink, OP_COLORS, surface } from "../palette.ts";
+import { FACE_COLORS, ink, OP_COLORS, surface } from "../palette.ts";
 import type { Shape } from "../rotation.ts";
 import { buildScene, VIEW_BOX } from "../solid.ts";
 
@@ -33,7 +33,8 @@ const GLOW_COLOR = "#ffe27a";
  */
 const SHOUT_COLORS: Record<Shape, string> = {
   "巡回": OP_COLORS[1],
-  "半回転": OP_COLORS[2],
+  "逆巡回": FACE_COLORS[0],
+  "クライン": OP_COLORS[2],
   "共役": OP_COLORS[0],
   "三連": ink.text,
   "4手": ink.good,
@@ -282,8 +283,9 @@ export const TetraSolid = clientEntry(
 /** The names worth leading with when a clear has several. */
 const RARE: Partial<Record<Shape, true>> = {
   "共役": true,
-  "半回転": true,
+  "クライン": true,
   "巡回": true,
+  "逆巡回": true,
 };
 
 /** The solid's own box, so the count can be laid over the middle of it. */

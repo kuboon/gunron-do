@@ -474,7 +474,7 @@ export class TetraDo {
     return this.#comboPop;
   }
   /**
-   * What the last clear was made of, as the solid shouts it: `巡回`, `共役`, and so on.
+   * What the last clear was made of, as the solid shouts it: `巡回`, `クライン`, and so on.
    *
    * A clear of nothing but same-letter triples says nothing. That silence is the point: the
    * shout is for the forms a player has to look for, and a triple is the one they find anyway.

@@ -281,12 +281,22 @@ function isAnswer(stretch: readonly Op[]): boolean {
  * can leave it unsaid, and the rest are the forms worth learning.
  *
  * - `三連`: the same move three times — `a a a`, `b⁻¹ b⁻¹ b⁻¹`
- * - `巡回`: the three letters once each, in cyclic order — `a b c`, `c⁻¹ b⁻¹ a⁻¹`
- * - `半回転`: a half-turn done twice — `a b⁻¹ a b⁻¹`
+ * - `巡回`: the three letters once each, in cyclic order, all turning the same way — `a b c`
+ * - `逆巡回`: the same going the other way round — `c⁻¹ b⁻¹ a⁻¹`
+ * - `クライン`: a half-turn done twice — `a b⁻¹ a b⁻¹`. The half-turns, with the identity, are the
+ *   Klein four-group, which is where the name comes from.
  * - `共役`: a letter made out of another by sandwiching — `a a c a⁻¹ c`
  * - `N手`: anything else, by its reduced length
  */
-export type Shape = "三連" | "巡回" | "半回転" | "共役" | "4手" | "5手" | "6手";
+export type Shape =
+  | "三連"
+  | "巡回"
+  | "逆巡回"
+  | "クライン"
+  | "共役"
+  | "4手"
+  | "5手"
+  | "6手";
 
 /**
  * What shape one answer is, judged on its reduced word.
@@ -297,9 +307,10 @@ function shapeOf(stretch: readonly Op[]): Shape {
   const { cancelled } = freeReduction(stretch);
   const w = stretch.filter((_, i) => !cancelled[i]);
   if (w.length === 3) {
-    return w[0] === w[1] && w[1] === w[2] ? "三連" : "巡回";
+    if (w[0] === w[1] && w[1] === w[2]) return "三連";
+    return opDirection(w[0]) > 0 ? "巡回" : "逆巡回";
   }
-  if (w.length === 4 && w[0] === w[2] && w[1] === w[3]) return "半回転";
+  if (w.length === 4 && w[0] === w[2] && w[1] === w[3]) return "クライン";
   if (w.length === 5) {
     for (let i = 0; i + 2 < w.length; i++) {
       if (w[i + 2] === opInverse(w[i]) && opBase(w[i + 1]) !== opBase(w[i])) {
