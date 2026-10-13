@@ -286,7 +286,12 @@ function isAnswer(stretch: readonly Op[]): boolean {
  * - `クライン`: a half-turn done twice — `a b⁻¹ a b⁻¹`. The half-turns, with the identity, are the
  *   Klein four-group, which is where the name comes from.
  * - `共役`: an answer with a move sandwiched between a move and its inverse (`x y x⁻¹`, which is
- *   another move or a rotation no cell holds) — `a c a⁻¹ b⁻¹`, `a a c a⁻¹ c`, `a a b a⁻¹ a⁻¹ c⁻¹`
+ *   another move or a rotation no cell holds) — `a c a⁻¹ b⁻¹`, `a a b a⁻¹ a⁻¹ c⁻¹`
+ * - `共役三連`, `共役巡回`, `共役逆巡回`: five moves that are a triple, a cycle or a reverse cycle
+ *   with one move written as a sandwich — `a a c b c⁻¹`, `a a c a⁻¹ c`, `a c⁻¹ a⁻¹ a⁻¹ c⁻¹`. Only
+ *   five moves can be, since a sandwich is three moves in the place of one. A four-move answer
+ *   is a cancelling pair with one half written so, and a six-move one has a move written as two
+ *   on top of that, so both are plain `共役`.
  * - `ダブル共役`: six moves that are two such sandwiches side by side — `a c a⁻¹ c⁻¹ a⁻¹ c`
  * - `N手`: anything else, by its reduced length
  */
@@ -296,6 +301,9 @@ export type Shape =
   | "逆巡回"
   | "クライン"
   | "共役"
+  | "共役三連"
+  | "共役巡回"
+  | "共役逆巡回"
   | "ダブル共役"
   | "4手"
   | "5手"
@@ -311,6 +319,28 @@ export type Shape =
 function hasSandwich(w: readonly Op[]): boolean {
   for (let i = 0; i + 2 < w.length; i++) if (sandwichAt(w, i)) return true;
   return false;
+}
+
+/**
+ * What a five-move answer is, if it is a triple, a cycle or a reverse cycle with one move written
+ * as a sandwich: the name of that, with 共役 in front.
+ *
+ * Reads each sandwich that is a single move (`a c a⁻¹` is `b`) as that move, and sees whether three
+ * moves are left that come home. The other sandwiches are the rotation about the corner no cell
+ * holds, and that is not a move, so they leave nothing to read.
+ */
+function conjugatedBase(w: readonly Op[]): Shape | null {
+  for (let i = 0; i + 2 < w.length; i++) {
+    if (!sandwichAt(w, i)) continue;
+    const single = [0, 1, 2, 3, 4, 5].find((t) =>
+      isIdentity(compose([w[i], w[i + 1], w[i + 2], opInverse(t as Op)]))
+    );
+    if (single === undefined) continue;
+    const three = [...w.slice(0, i), single as Op, ...w.slice(i + 3)];
+    if (traceLength(three) !== 3) continue;
+    return `共役${shapeOf(three)}` as Shape;
+  }
+  return null;
 }
 
 /** Whether the three moves from `i` are a move, another, and the first one's inverse. */
@@ -333,6 +363,10 @@ function shapeOf(stretch: readonly Op[]): Shape {
   if (w.length === 4 && w[0] === w[2] && w[1] === w[3]) return "クライン";
   if (w.length === 6 && sandwichAt(w, 0) && sandwichAt(w, 3)) {
     return "ダブル共役";
+  }
+  if (w.length === 5) {
+    const base = conjugatedBase(w);
+    if (base !== null) return base;
   }
   if (hasSandwich(w)) return "共役";
   return `${Math.min(6, Math.max(4, w.length))}手` as Shape;

@@ -36,6 +36,9 @@ const SHOUT_COLORS: Record<Shape, string> = {
   "逆巡回": FACE_COLORS[0],
   "クライン": OP_COLORS[2],
   "共役": OP_COLORS[0],
+  "共役三連": OP_COLORS[0],
+  "共役巡回": OP_COLORS[0],
+  "共役逆巡回": OP_COLORS[0],
   "ダブル共役": GLOW_COLOR,
   "三連": ink.text,
   "4手": ink.good,
@@ -284,6 +287,9 @@ export const TetraSolid = clientEntry(
 /** The names worth leading with when a clear has several. */
 const RARE: Partial<Record<Shape, true>> = {
   "共役": true,
+  "共役三連": true,
+  "共役巡回": true,
+  "共役逆巡回": true,
   "ダブル共役": true,
   "クライン": true,
   "巡回": true,
