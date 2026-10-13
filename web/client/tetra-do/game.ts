@@ -17,6 +17,7 @@
  */
 
 import {
+  answerShapes,
   chain,
   compose,
   IDENTITY,
@@ -29,6 +30,7 @@ import {
   opInverse,
   type Overrun,
   type Quat,
+  type Shape,
   slerp,
   traceLength,
 } from "./rotation.ts";
@@ -133,6 +135,13 @@ export type Knock = "cancel" | "medium" | "large";
 export interface Shake {
   id: number;
   strength: Knock;
+}
+
+/** What a clear was made of, to be called out: one name per answer that was not a triple. */
+export interface Shout {
+  /** New with every shout, so the solid can restart its animation for a second one. */
+  id: number;
+  shapes: readonly Shape[];
 }
 
 export interface Pop {
@@ -244,6 +253,8 @@ export class TetraDo {
   #phase: Phase = "ready";
   #clearedPop: Pop | null = null;
   #comboPop: Pop | null = null;
+  /** The last clear's shapes, called out over the solid — or `null` when there was nothing to say. */
+  #shout: Shout | null = null;
   /** Cells the walkthrough is pointing at, for the board to ring. */
   #hint: readonly number[] = [];
   #popId = 0;
@@ -462,6 +473,15 @@ export class TetraDo {
   get comboPop(): Pop | null {
     return this.#comboPop;
   }
+  /**
+   * What the last clear was made of, as the solid shouts it: `巡回`, `クライン`, and so on.
+   *
+   * A clear of nothing but same-letter triples says nothing. That silence is the point: the
+   * shout is for the forms a player has to look for, and a triple is the one they find anyway.
+   */
+  get shout(): Shout | null {
+    return this.#shout;
+  }
   /** The sparks thrown by the cells that just cleared, or `null` between clears. */
   get burst(): Burst | null {
     return this.#burst;
@@ -580,6 +600,7 @@ export class TetraDo {
     this.#combo = 0;
     this.#clearedPop = null;
     this.#comboPop = null;
+    this.#shout = null;
     this.#burst = null;
     this.#shake = null;
     this.#hitStop = 0;
@@ -653,6 +674,7 @@ export class TetraDo {
     this.#phase = "playing";
     this.#clearedPop = null;
     this.#comboPop = null;
+    this.#shout = null;
     this.#burst = null;
     this.#shake = null;
     this.#hitStop = 0;
@@ -890,6 +912,9 @@ export class TetraDo {
     // An arrow rather than the bare number: beside a number that already says `4`, a floating
     // `4` reads as a second count rather than as the one that just moved.
     if (record) this.#comboPop = this.#pop(`↑${closings}`);
+    // Named, so a player sees what they just did and what it was called. Triples go unsaid.
+    const shapes = answerShapes(this.word).filter((shape) => shape !== "三連");
+    if (shapes.length > 0) this.#shout = { id: ++this.#popId, shapes };
     this.#queue.push({ kind: "flash" });
 
     this.#burst = {
