@@ -285,7 +285,9 @@ function isAnswer(stretch: readonly Op[]): boolean {
  * - `逆巡回`: the same going the other way round — `c⁻¹ b⁻¹ a⁻¹`
  * - `クライン`: a half-turn done twice — `a b⁻¹ a b⁻¹`. The half-turns, with the identity, are the
  *   Klein four-group, which is where the name comes from.
- * - `共役`: a letter made out of another by sandwiching — `a a c a⁻¹ c`
+ * - `共役`: a four- or five-move answer with a move sandwiched between a move and its inverse
+ *   (`x y x⁻¹`, which is another move or a rotation no cell holds) — `a a c a⁻¹ c`, `a c a⁻¹ b⁻¹`.
+ *   Six-move answers are not named for it: about half of them have such a stretch by accident.
  * - `N手`: anything else, by its reduced length
  */
 export type Shape =
@@ -297,6 +299,22 @@ export type Shape =
   | "4手"
   | "5手"
   | "6手";
+
+/**
+ * Whether a word has a move between another move and its inverse, as in `a c a⁻¹`.
+ *
+ * The outer two undo each other, so the stretch is the middle move turned into something else:
+ * conjugated. Three of the six are another move (`a c a⁻¹` = `b`); the other three are the rotation
+ * about the corner no cell holds.
+ */
+function hasSandwich(w: readonly Op[]): boolean {
+  for (let i = 0; i + 2 < w.length; i++) {
+    if (w[i + 2] === opInverse(w[i]) && opBase(w[i + 1]) !== opBase(w[i])) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * What shape one answer is, judged on its reduced word.
@@ -311,13 +329,7 @@ function shapeOf(stretch: readonly Op[]): Shape {
     return opDirection(w[0]) > 0 ? "巡回" : "逆巡回";
   }
   if (w.length === 4 && w[0] === w[2] && w[1] === w[3]) return "クライン";
-  if (w.length === 5) {
-    for (let i = 0; i + 2 < w.length; i++) {
-      if (w[i + 2] === opInverse(w[i]) && opBase(w[i + 1]) !== opBase(w[i])) {
-        return "共役";
-      }
-    }
-  }
+  if ((w.length === 4 || w.length === 5) && hasSandwich(w)) return "共役";
   return `${Math.min(6, Math.max(4, w.length))}手` as Shape;
 }
 

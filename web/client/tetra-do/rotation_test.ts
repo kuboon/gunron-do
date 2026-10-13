@@ -71,6 +71,12 @@ Deno.test("answers are named by their shape", () => {
   deepStrictEqual(answerShapes([a, B, a, B]), ["クライン"]);
   // a (a c a⁻¹) c: the b of a b c made by conjugation.
   deepStrictEqual(answerShapes([a, a, c, A, c]), ["共役"]);
+  // A four-move answer with a sandwich is a conjugation too: a c a⁻¹ is b, so this is b b⁻¹.
+  deepStrictEqual(answerShapes([a, c, A, B]), ["共役"]);
+  deepStrictEqual(answerShapes([c, b, C, A]), ["共役"]);
+  // A four-move answer that is a three-move one with a move written as two is only a 4手.
+  deepStrictEqual(answerShapes([a, a, C, B]), ["4手"]);
+  deepStrictEqual(answerShapes([a, C, B, a]), ["4手"]);
   // A cancelling pair inside an answer does not change its shape.
   deepStrictEqual(answerShapes([a, b, B, a, a]), ["三連"]);
   // One shape per answer, in order.
