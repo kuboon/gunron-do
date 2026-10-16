@@ -76,7 +76,10 @@ const COMBOS: readonly RoundAchievement[] = [
 ];
 
 /**
- * An achievement that a named shape earns: the first time a clear is shouted as that 役.
+ * An achievement that a named shape earns: a clear shouted as that 役, counted when the round ends.
+ *
+ * Sent with the round's 消去 as its score, like {@link HIGH_SCORE} — so the hub shows the best round
+ * each 役 was found in. A round given up half way sends none of them.
  *
  * 三連 has none — it is silent, and 「はじめての成立」 is already the first of it. The common
  * forms are open; the ones a player has to go looking for are hidden, so finding the word on the
@@ -164,7 +167,7 @@ export const SHAPE_ACHIEVEMENTS: readonly ShapeAchievement[] = [
     shape: "5手",
     title: "5手",
     description: "どの形にも当てはまらない5手で成立させる",
-    points: 20,
+    points: 40,
     hidden: false,
   },
   {
@@ -172,7 +175,7 @@ export const SHAPE_ACHIEVEMENTS: readonly ShapeAchievement[] = [
     shape: "6手",
     title: "6手",
     description: "どの形にも当てはまらない6手で成立させる",
-    points: 30,
+    points: 60,
     hidden: false,
   },
 ];
