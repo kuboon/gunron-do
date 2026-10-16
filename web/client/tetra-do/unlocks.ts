@@ -25,6 +25,7 @@ import {
   HIGH_SCORE,
   REPLAY,
   ROUND_ACHIEVEMENTS,
+  SHAPE_ACHIEVEMENTS,
   SHARE,
   TUTORIAL,
 } from "./achievements.ts";
@@ -56,6 +57,7 @@ class Unlocks {
   #center: GameCenter | null = null;
   #earned: Earned = { keys: [], best: null };
   #phase: Phase | null = null;
+  #shoutId = 0;
   #listeners = new Set<Listener>();
 
   /**
@@ -133,6 +135,15 @@ class Unlocks {
     };
     for (const achievement of ROUND_ACHIEVEMENTS) {
       if (achievement.earned(round)) void this.#unlock(achievement.key);
+    }
+    const shout = game.shout;
+    if (shout !== null && shout.id !== this.#shoutId) {
+      this.#shoutId = shout.id;
+      for (const achievement of SHAPE_ACHIEVEMENTS) {
+        if (shout.shapes.includes(achievement.shape)) {
+          void this.#unlock(achievement.key);
+        }
+      }
     }
     if (ended) void this.#best(round.cleared);
   }

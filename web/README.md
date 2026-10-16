@@ -558,6 +558,8 @@ the game can unlock, and each threshold sits next to the words describing it.
 `client/tetra-do/unlocks.ts` watches the game against that list and hands
 keys to the SDK (`jsr:@kuboon/game-center-sdk`). Only real rounds count — not the
 walkthrough, not a replay — except for the achievements that are about those.
+Each 役 (`巡回`, `クライン`, `ダブル共役`, …) has one too, earned the first time a clear
+is shouted as that shape; the rare ones are hidden. 三連 has none.
 
 A player who came in from the hub carries a launch token, and each unlock is
 recorded as it happens. Anyone else has them queued on the device, and the
