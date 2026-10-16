@@ -11,6 +11,7 @@
  */
 
 import type { Achievement } from "../gamecenter.ts";
+import type { Shape } from "./rotation.ts";
 
 /** The game's slug on the hub — the same as the site's. */
 export const GAMECENTER_ID = "tetra-do";
@@ -71,6 +72,111 @@ const COMBOS: readonly RoundAchievement[] = [
     points: 100,
     hidden: true,
     earned: (round) => round.combo >= 8,
+  },
+];
+
+/**
+ * An achievement that a named shape earns: a clear shouted as that 役, counted when the round ends.
+ *
+ * Sent with the round's 消去 as its score, like {@link HIGH_SCORE} — so the hub shows the best round
+ * each 役 was found in. A round given up half way sends none of them.
+ *
+ * 三連 has none — it is silent, and 「はじめての成立」 is already the first of it. The common
+ * forms are open; the ones a player has to go looking for are hidden, so finding the word on the
+ * solid is the first they hear of it.
+ */
+interface ShapeAchievement extends Achievement {
+  shape: Shape;
+}
+
+export const SHAPE_ACHIEVEMENTS: readonly ShapeAchievement[] = [
+  {
+    key: "shape_loop",
+    shape: "巡回",
+    title: "巡回",
+    description: "3つの別々の頂点を回って戻る（a b c のような形）で成立させる",
+    points: 20,
+    hidden: false,
+  },
+  {
+    key: "shape_loop_back",
+    shape: "逆巡回",
+    title: "逆巡回",
+    description: "巡回を逆向きに回って成立させる",
+    points: 20,
+    hidden: false,
+  },
+  {
+    key: "shape_klein",
+    shape: "クライン",
+    title: "クライン",
+    description: "4手で戻る形（a b a b のような形）で成立させる",
+    points: 30,
+    hidden: false,
+  },
+  {
+    key: "shape_conjugate",
+    shape: "共役",
+    title: "共役",
+    description: "x y x⁻¹ を含む形で成立させる",
+    points: 30,
+    hidden: false,
+  },
+  {
+    key: "shape_conjugate_triple",
+    shape: "共役三連",
+    title: "共役三連",
+    description: "三連を共役でくるんだ5手で成立させる",
+    points: 50,
+    hidden: true,
+  },
+  {
+    key: "shape_conjugate_loop",
+    shape: "共役巡回",
+    title: "共役巡回",
+    description: "巡回を共役でくるんだ5手で成立させる",
+    points: 50,
+    hidden: true,
+  },
+  {
+    key: "shape_conjugate_loop_back",
+    shape: "共役逆巡回",
+    title: "共役逆巡回",
+    description: "逆巡回を共役でくるんだ5手で成立させる",
+    points: 50,
+    hidden: true,
+  },
+  {
+    key: "shape_double_conjugate",
+    shape: "ダブル共役",
+    title: "ダブル共役",
+    description: "共役を2か所に入れた6手で成立させる",
+    points: 80,
+    hidden: true,
+  },
+  {
+    key: "shape_4",
+    shape: "4手",
+    title: "4手",
+    description: "クラインでも共役でもない4手で成立させる",
+    points: 10,
+    hidden: false,
+  },
+  {
+    key: "shape_5",
+    shape: "5手",
+    title: "5手",
+    description: "どの形にも当てはまらない5手で成立させる",
+    points: 40,
+    hidden: false,
+  },
+  {
+    key: "shape_6",
+    shape: "6手",
+    title: "6手",
+    description: "どの形にも当てはまらない6手で成立させる",
+    points: 60,
+    hidden: false,
   },
 ];
 
@@ -154,12 +260,13 @@ export const REPLAY: Achievement = {
 };
 
 /**
- * Every achievement, in the order the hub lists them: the way in first, then the round's own, then
+ * Every achievement, in the order the hub lists them: the way in first, then the round's own, the 役, then
  * the ones about sharing a round.
  */
 export const ACHIEVEMENTS: readonly Achievement[] = [
   TUTORIAL,
   ...ROUND_ACHIEVEMENTS.map(({ earned: _, ...achievement }) => achievement),
+  ...SHAPE_ACHIEVEMENTS.map(({ shape: _, ...achievement }) => achievement),
   HIGH_SCORE,
   SHARE,
   REPLAY,

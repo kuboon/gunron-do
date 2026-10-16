@@ -25,6 +25,7 @@ import {
   HIGH_SCORE,
   REPLAY,
   ROUND_ACHIEVEMENTS,
+  SHAPE_ACHIEVEMENTS,
   SHARE,
   TUTORIAL,
 } from "./achievements.ts";
@@ -50,12 +51,17 @@ interface Earned {
   keys: string[];
   /** The best 消去 sent as {@link HIGH_SCORE}'s score, or `null` before a round was finished. */
   best: number | null;
+  /** The 消去 each 役 was last sent with. */
+  scores?: Record<string, number>;
 }
 
 class Unlocks {
   #center: GameCenter | null = null;
   #earned: Earned = { keys: [], best: null };
   #phase: Phase | null = null;
+  #shoutId = 0;
+  /** The 役 shouted so far this round, sent when it ends. */
+  #shapes = new Set<string>();
   #listeners = new Set<Listener>();
 
   /**
@@ -118,6 +124,8 @@ class Unlocks {
   #watchGame(): void {
     const phase = game.phase;
     const ended = phase === "over" && this.#phase !== "over";
+    // A round given up half way takes its 役 with it.
+    if (phase === "counting") this.#shapes.clear();
     this.#phase = phase;
 
     if (game.replaying) {
@@ -134,7 +142,20 @@ class Unlocks {
     for (const achievement of ROUND_ACHIEVEMENTS) {
       if (achievement.earned(round)) void this.#unlock(achievement.key);
     }
-    if (ended) void this.#best(round.cleared);
+    const shout = game.shout;
+    if (shout !== null && shout.id !== this.#shoutId) {
+      this.#shoutId = shout.id;
+      for (const achievement of SHAPE_ACHIEVEMENTS) {
+        if (shout.shapes.includes(achievement.shape)) {
+          this.#shapes.add(achievement.key);
+        }
+      }
+    }
+    if (ended) {
+      void this.#best(round.cleared);
+      for (const key of this.#shapes) void this.#score(key, round.cleared);
+      this.#shapes.clear();
+    }
   }
 
   /** A finished round's 消去, sent when it is the best this device has seen. */
@@ -144,6 +165,22 @@ class Unlocks {
     this.#earned = { ...this.#earned, best: cleared };
     writeEarned(this.#earned);
     await this.#center?.unlock(HIGH_SCORE.key, { score: cleared });
+    this.#emit();
+  }
+
+  /** A 役 found this round, sent with the round's 消去 when that beats the best it was found in. */
+  async #score(key: string, cleared: number): Promise<void> {
+    const best = this.#earned.scores?.[key];
+    if (best !== undefined && cleared <= best) return;
+    this.#earned = {
+      ...this.#earned,
+      keys: this.#earned.keys.includes(key)
+        ? this.#earned.keys
+        : [...this.#earned.keys, key],
+      scores: { ...this.#earned.scores, [key]: cleared },
+    };
+    writeEarned(this.#earned);
+    await this.#center?.unlock(key, { score: cleared });
     this.#emit();
   }
 
@@ -173,6 +210,11 @@ function readEarned(): Earned {
         ? raw.keys.filter((key: unknown) => typeof key === "string")
         : [],
       best: typeof raw?.best === "number" ? raw.best : null,
+      scores: raw?.scores && typeof raw.scores === "object"
+        ? Object.fromEntries(
+          Object.entries(raw.scores).filter(([, v]) => typeof v === "number"),
+        ) as Record<string, number>
+        : {},
     };
   } catch {
     return { keys: [], best: null };
