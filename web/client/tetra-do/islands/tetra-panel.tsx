@@ -2,7 +2,8 @@
  * The panel that covers the board between rounds.
  *
  * Three things wear the same shape: the board before a round starts, a recording before it plays,
- * and the result after either of them ends. All three are the same question — *what happens next*
+ * and the same recording once it has ended — which is also what a round the player just finished
+ * turns into, at the URL that replays it. All three are the same question — *what happens next*
  * — so all three are the same opaque rectangle laid exactly over the board, with the clock, the
  * solid and the buttons left where they are. A wash over the whole screen dimmed the things the
  * player still wanted to read; this covers only what has nothing to say yet.
@@ -33,7 +34,7 @@ import {
 import { game, type Outcome, outcome } from "../game.ts";
 import { ink, OP_COLORS, surface } from "../palette.ts";
 import { decodeMoves, encodeMoves, type Move } from "../record.ts";
-import { playUrl, readSession, type Session, shareUrl } from "../session.ts";
+import { boardUrl, playUrl, readSession, type Session } from "../session.ts";
 import { shareCardUrl } from "../share.ts";
 import { tutorial } from "../tutorial.ts";
 import { unlocks } from "../unlocks.ts";
@@ -71,8 +72,10 @@ export const TetraPanel = clientEntry(
     const rec = session?.rec ?? null;
 
     let recording: Recording = { state: rec === null ? "none" : "loading" };
-    /** Set while the link to a finished round is being built, so the button is pressed once. */
-    let leaving = false;
+    /** Whether this page dealt the round that is on it, rather than being opened onto one. */
+    let played = false;
+    /** Whether the round that just ended has been written into the address bar. */
+    let finished = false;
 
     if (session !== null && rec !== null) {
       decodeMoves(rec).then((moves) => {
@@ -89,17 +92,51 @@ export const TetraPanel = clientEntry(
     }
 
     const stop = game.subscribe(() => {
+      if (game.phase !== "over") finished = false;
+      else if (!game.replaying && !finished) {
+        finished = true;
+        finish();
+      }
       handle.update();
     });
     handle.signal.addEventListener("abort", stop, { once: true });
 
-    /** Leaves for this round's own URL, which is the round: the day, and what was done on it. */
-    async function share(): Promise<void> {
-      if (session === null || leaving) return;
-      leaving = true;
-      handle.update();
-      unlocks.shared();
-      location.href = shareUrl(session.date, await encodeMoves(game.moves));
+    /**
+     * Turns the round that just ended into its own URL, and shows it as any recording is shown.
+     *
+     * The address is the round — the day, and what was done on it — so the moment a round is over
+     * the page is at the link that replays it, with the panel a visitor to that link would see.
+     * Pushed rather than replaced: the board the player started from is still one step back.
+     */
+    function finish(): void {
+      const date = game.date;
+      const moves = [...game.moves];
+      const result: Outcome = {
+        cleared: game.cleared,
+        solved: game.solved,
+        combo: game.combo,
+      };
+      played = true;
+      recording = { state: "loading" };
+      void encodeMoves(moves).then((rec) => {
+        if (handle.signal.aborted) return;
+        recording = { state: "ready", rec, moves, result };
+        history.pushState(null, "", boardUrl(date, rec));
+        handle.update();
+      });
+    }
+
+    // The page is a single document with the address changed under it, so the back button has to
+    // be told what the address now means. Reloading is the one answer that is always right: the
+    // page reads its URL on the way in, and every address this page writes is one it can read.
+    if (session !== null) {
+      const back = () => location.reload();
+      addEventListener("popstate", back);
+      handle.signal.addEventListener(
+        "abort",
+        () => removeEventListener("popstate", back),
+        { once: true },
+      );
     }
 
     function play(): void {
@@ -133,10 +170,16 @@ export const TetraPanel = clientEntry(
       // The lesson is the board itself, so the panel has to be off it.
       if (tutorial.running) return null;
 
-      // A recording that has not started, and the numbers it is about to reach.
+      // A round that is over is shown while the link to it is still being built.
+      if (game.phase === "over" && recording.state === "loading") return null;
+
+      // A recording that has not started, and the numbers it is about to reach — and the same panel
+      // when a round is over, whether it was played just now or played back, because the round is
+      // the same one and so is what can be done with it: watch it, take it on, or send it to
+      // somebody.
       if (
-        game.phase === "ready" && recording.state === "ready" &&
-        !game.replaying
+        recording.state === "ready" &&
+        (game.phase === "ready" && !game.replaying || game.phase === "over")
       ) {
         return (
           <div mix={panelStyle}>
@@ -148,7 +191,7 @@ export const TetraPanel = clientEntry(
                 type="button"
                 mix={[primaryStyle, on<HTMLButtonElement>("click", play)]}
               >
-                再生する
+                リプレイを再生
               </button>
               <a
                 mix={secondaryLinkStyle}
@@ -160,7 +203,11 @@ export const TetraPanel = clientEntry(
             </div>
             {shareRow(
               shareCardUrl(session.date, recording.rec, recording.result),
+              () => {
+                if (played) unlocks.shared();
+              },
             )}
+            {claim()}
           </div>
         );
       }
@@ -223,76 +270,13 @@ export const TetraPanel = clientEntry(
         );
       }
 
-      // What it came to.
-      if (game.phase === "over") {
-        return (
-          <div mix={panelStyle}>
-            <p mix={eyebrowStyle}>
-              {game.replaying ? "再生おわり" : "おわり"}
-            </p>
-            <p mix={dateStyle}>{game.date} の盤面</p>
-            {scoreboard({
-              cleared: game.cleared,
-              solved: game.solved,
-              combo: game.combo,
-            })}
-            <div mix={buttonsStyle}>
-              {game.replaying
-                ? (
-                  <>
-                    <button
-                      type="button"
-                      mix={[primaryStyle, on<HTMLButtonElement>("click", play)]}
-                    >
-                      もう一度再生
-                    </button>
-                    <a
-                      mix={secondaryLinkStyle}
-                      data-rmx-document
-                      href={playUrl(session.date)}
-                    >
-                      自分で挑戦
-                    </a>
-                  </>
-                )
-                : (
-                  <>
-                    <button
-                      type="button"
-                      mix={[
-                        primaryStyle,
-                        on<HTMLButtonElement>("click", () => game.restart()),
-                      ]}
-                    >
-                      もう一度
-                    </button>
-                    <button
-                      type="button"
-                      disabled={leaving}
-                      mix={[
-                        secondaryStyle,
-                        on<HTMLButtonElement>("click", () => {
-                          void share();
-                        }),
-                      ]}
-                    >
-                      {leaving ? "…" : "リプレイのURL"}
-                    </button>
-                  </>
-                )}
-            </div>
-            {claim()}
-          </div>
-        );
-      }
-
       return null;
     };
   },
 );
 
 /**
- * The share row under 再生する.
+ * The share row under リプレイを再生.
  *
  * `@kuboon/share-element`'s `<share-buttons>`, built by hand rather than written as a tag: it is a
  * custom element and the JSX here knows the DOM's own elements only, so calling the package's
@@ -313,12 +297,13 @@ export const TetraPanel = clientEntry(
  * cannot reach them.
  *
  * @param url What the buttons share
+ * @param onShare Called when any of the buttons is pressed
  * @returns The row's own box, filled once it is in the document
  */
-function shareRow(url: string): RemixNode {
+function shareRow(url: string, onShare: () => void): RemixNode {
   return (
     <div
-      mix={[shareStyle, ref((node) => fillShareRow(node, url))]}
+      mix={[shareStyle, ref((node) => fillShareRow(node, url, onShare))]}
       data-rmx-preserve-dom
       data-share-row
     />
@@ -330,11 +315,13 @@ function shareRow(url: string): RemixNode {
  *
  * @param node The box
  * @param url What the buttons share
+ * @param onShare Called when any of the buttons is pressed
  */
-function fillShareRow(node: Element, url: string): void {
+function fillShareRow(node: Element, url: string, onShare: () => void): void {
   let row = node.firstElementChild as ShareButtonsElement | null;
   if (row === null) {
     row = createShareButtons();
+    row.addEventListener("click", onShare);
     node.append(row);
   }
   row.url = url;

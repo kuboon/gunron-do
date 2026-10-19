@@ -146,7 +146,7 @@ export const TetraControls = clientEntry(
                   browser's back button — and pressing the thing that says リプレイ中 to get out of
                   the replay is what a player tries first anyway. `preview` puts the day's board
                   back and the phase back to `ready`, which is the panel the recording started from,
-                  scoreboard and 再生する and all.
+                  scoreboard and リプレイを再生 and all.
                 */
                 }
                 <button
