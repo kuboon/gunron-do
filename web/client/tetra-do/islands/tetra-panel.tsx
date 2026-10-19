@@ -133,10 +133,13 @@ export const TetraPanel = clientEntry(
       // The lesson is the board itself, so the panel has to be off it.
       if (tutorial.running) return null;
 
-      // A recording that has not started, and the numbers it is about to reach.
+      // A recording that has not started, and the numbers it is about to reach — and the same panel
+      // again once it has played through, because the round is the same one and so is what can be
+      // done with it: play it again, take it on, or send it to somebody.
       if (
-        game.phase === "ready" && recording.state === "ready" &&
-        !game.replaying
+        recording.state === "ready" &&
+        (game.phase === "ready" && !game.replaying ||
+          game.phase === "over" && game.replaying)
       ) {
         return (
           <div mix={panelStyle}>
@@ -227,9 +230,7 @@ export const TetraPanel = clientEntry(
       if (game.phase === "over") {
         return (
           <div mix={panelStyle}>
-            <p mix={eyebrowStyle}>
-              {game.replaying ? "再生おわり" : "おわり"}
-            </p>
+            <p mix={eyebrowStyle}>おわり</p>
             <p mix={dateStyle}>{game.date} の盤面</p>
             {scoreboard({
               cleared: game.cleared,
@@ -237,49 +238,27 @@ export const TetraPanel = clientEntry(
               combo: game.combo,
             })}
             <div mix={buttonsStyle}>
-              {game.replaying
-                ? (
-                  <>
-                    <button
-                      type="button"
-                      mix={[primaryStyle, on<HTMLButtonElement>("click", play)]}
-                    >
-                      もう一度再生
-                    </button>
-                    <a
-                      mix={secondaryLinkStyle}
-                      data-rmx-document
-                      href={playUrl(session.date)}
-                    >
-                      自分で挑戦
-                    </a>
-                  </>
-                )
-                : (
-                  <>
-                    <button
-                      type="button"
-                      mix={[
-                        primaryStyle,
-                        on<HTMLButtonElement>("click", () => game.restart()),
-                      ]}
-                    >
-                      もう一度
-                    </button>
-                    <button
-                      type="button"
-                      disabled={leaving}
-                      mix={[
-                        secondaryStyle,
-                        on<HTMLButtonElement>("click", () => {
-                          void share();
-                        }),
-                      ]}
-                    >
-                      {leaving ? "…" : "リプレイのURL"}
-                    </button>
-                  </>
-                )}
+              <button
+                type="button"
+                mix={[
+                  primaryStyle,
+                  on<HTMLButtonElement>("click", () => game.restart()),
+                ]}
+              >
+                もう一度
+              </button>
+              <button
+                type="button"
+                disabled={leaving}
+                mix={[
+                  secondaryStyle,
+                  on<HTMLButtonElement>("click", () => {
+                    void share();
+                  }),
+                ]}
+              >
+                {leaving ? "…" : "リプレイのURL"}
+              </button>
             </div>
             {claim()}
           </div>
