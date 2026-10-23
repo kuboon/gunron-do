@@ -57,6 +57,7 @@ const RADIUS: Readonly<Record<SpeciesId, number>> = {
   D4: 9,
   A4: 9,
   S4: 8.1,
+  O: 8.8,
   A5: 10.5,
 };
 
@@ -78,6 +79,12 @@ export const WHIRL_TIME = 2.4;
 /** How many times the boss has to be brought home and shot before it breaks. */
 const BOSS_LIVES = 3;
 
+/** How many shots more than the fewest an enemy's count starts with. */
+export const BONUS_SPARE = 3;
+
+/** How much faster an enemy comes once its count has run out. */
+const RAGE_SPEED = 2.5;
+
 /** How far a stick has to be pushed before it leaves the middle. */
 const DEAD_ZONE = 0.22;
 
@@ -91,6 +98,12 @@ export interface Enemy {
   start: number;
   /** Shots it has taken since it last started. */
   taken: number;
+  /**
+   * The count over its head: the fewest shots home plus `BONUS_SPARE`, one less for every round
+   * that turns it. Finished while it is above 0, it scores that many times over; once it reaches 0
+   * the count is gone, the enemy speeds up, and finishing it scores nothing.
+   */
+  bonus: number;
   /** Where it is. */
   pos: Vec3;
   /** How big it is drawn. */
@@ -149,6 +162,8 @@ export type GameEvent =
     gain: number;
   }
   | { type: "scramble"; enemy: Enemy; from: Quat; to: Quat }
+  /** Its count ran out: no points for it now, and it comes faster. */
+  | { type: "rage"; enemy: Enemy }
   | { type: "miss"; what: Spin | "cannon" }
   | { type: "cannon"; kill: Kill | null; bounced: Enemy | null }
   | { type: "breach"; enemy: Enemy }
@@ -193,45 +208,53 @@ const WAVES: readonly Wave[] = [
   },
   {
     title: "D₃ 正三角形",
-    spawns: [["D3", 5]],
+    spawns: [["D3", 4]],
     depth: [1, 1],
     speed: 1.35,
     gap: 4.6,
   },
   {
     title: "A₄ 正四面体",
-    spawns: [["A4", 5]],
+    spawns: [["A4", 4]],
     depth: [1, 1],
     speed: 1.45,
     gap: 4.4,
   },
   {
-    title: "混成部隊",
-    spawns: [["D3", 2], ["A4", 3], ["D4", 3]],
-    depth: [1, 2],
-    speed: 1.55,
-    gap: 3.8,
-  },
-  {
-    title: "S₄ 立方体",
-    spawns: [["S4", 5]],
+    title: "S₄ 立方体と正八面体",
+    spawns: [["S4", 2], ["O", 3]],
     depth: [1, 2],
     speed: 1.4,
     gap: 4.6,
   },
   {
+    title: "A₅ 正十二面体",
+    spawns: [["A4", 2], ["A5", 1]],
+    depth: [2, 2],
+    speed: 0.9,
+    gap: 4.4,
+    boss: true,
+  },
+  {
+    title: "混成部隊",
+    spawns: [["D3", 2], ["O", 2], ["A4", 2], ["D4", 2]],
+    depth: [1, 2],
+    speed: 1.55,
+    gap: 3.8,
+  },
+  {
     title: "総力戦",
-    spawns: [["D4", 2], ["S4", 3], ["A4", 3], ["D3", 2]],
+    spawns: [["D4", 2], ["S4", 2], ["O", 2], ["A4", 2], ["D3", 1]],
     depth: [1, 2],
     speed: 1.6,
     gap: 3.4,
   },
   {
-    title: "A₅ 正十二面体",
-    spawns: [["S4", 2], ["A4", 2], ["A5", 1]],
+    title: "A₅ 再来",
+    spawns: [["S4", 1], ["O", 2], ["A5", 1]],
     depth: [2, 2],
-    speed: 0.9,
-    gap: 4.4,
+    speed: 0.95,
+    gap: 4.2,
     boss: true,
   },
 ];
@@ -455,8 +478,8 @@ class Game {
     const perfect = enemy.taken === enemy.start;
     enemy.lives -= 1;
     const broken = enemy.lives <= 0;
-    const points = enemy.species.order * 10 * Math.min(this.combo, 10) *
-      (perfect ? 2 : 1) * (enemy.boss && broken ? 5 : 1);
+    const points = enemy.species.order * 10 * enemy.bonus *
+      Math.min(this.combo, 10) * (enemy.boss && broken ? 5 : 1);
     this.score += points;
     if (perfect) this.perfects += 1;
     if (broken) {
@@ -531,7 +554,9 @@ class Game {
         if (enemy.whirl === 0) changed = true;
       }
       const stunned = ahead === null && enemy.state === 0;
-      let z = enemy.pos[2] + enemy.speed * dt * (stunned ? 0.25 : 1);
+      const rage = enemy.bonus > 0 ? 1 : RAGE_SPEED;
+      let z = enemy.pos[2] +
+        enemy.speed * dt * rage * (stunned ? 0.25 : 1);
       if (ahead !== null && ahead.entry >= 1) {
         z = Math.min(z, ahead.pos[2] - (ahead.radius + enemy.radius + 1.2));
       }
@@ -668,6 +693,11 @@ class Game {
     const before = s.depth[enemy.state];
     enemy.state = s.next[spin][spot][enemy.state];
     enemy.taken += 1;
+    const wasCounting = enemy.bonus > 0;
+    enemy.bonus = Math.max(0, enemy.bonus - 1);
+    if (wasCounting && enemy.bonus === 0) {
+      this.#events.push({ type: "rage", enemy });
+    }
     this.#events.push({
       type: "turn",
       enemy,
@@ -689,6 +719,7 @@ class Game {
     enemy.state = choices[Math.floor(Math.random() * choices.length)];
     enemy.start = s.depth[enemy.state];
     enemy.taken = 0;
+    enemy.bonus = enemy.start + BONUS_SPARE;
     this.#events.push({
       type: "scramble",
       enemy,
@@ -733,6 +764,7 @@ class Game {
       state,
       start: species.depth[state],
       taken: 0,
+      bonus: species.depth[state] + BONUS_SPARE,
       pos: [
         this.#side * ENTRY_SIDE,
         radius + 0.9,

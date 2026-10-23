@@ -364,9 +364,8 @@ export function start(host: HTMLElement): () => void {
 
   const onPointerUp = (e: PointerEvent) => {
     if (thumb === null || e.pointerId !== thumb.id) return;
-    // Let go, the aim stays where the stick left it; a tap without a drag puts it back in the
-    // middle.
-    if (!thumb.moved) game.steer(0, 0);
+    // Let go, the stick springs back to the middle, and so does the aim.
+    game.steer(0, 0);
     thumb = null;
     restStick();
   };
@@ -519,6 +518,19 @@ export function start(host: HTMLElement): () => void {
           DANGER,
           "lg",
         );
+        break;
+      }
+      case "rage": {
+        // Its count ran out: a red flash round it as it starts to hurry.
+        tmp.set(ev.enemy.pos[0], 0.1, ev.enemy.pos[2]);
+        fx.ring(
+          tmp,
+          DANGER,
+          ev.enemy.radius * 0.6,
+          ev.enemy.radius * 1.8,
+          0.4,
+        );
+        addTrauma(0.12);
         break;
       }
       case "miss":

@@ -1,5 +1,5 @@
 /**
- * The enemies' bodies: five solids, each set up so that its "home" pose means something.
+ * The enemies' bodies: six solids, each set up so that its "home" pose means something.
  *
  * Every solid is built the same way round. One face — the `e` face — looks straight at the turret
  * along `+Z`, and it sits flat on its bottom edge, the way a letter sits on a line. That pose is
@@ -104,6 +104,18 @@ export function cube(): Solid {
     [0, 1, 0],
     [0, -1, 0],
   ]);
+}
+
+/** The regular octahedron: the cube's dual, with a corner where each of the cube's faces is. */
+export function octahedron(): Solid {
+  const normals: Vec3[] = [];
+  for (const x of [1, -1]) {
+    for (const y of [1, -1]) for (const z of [1, -1]) normals.push([x, y, z]);
+  }
+  return polyhedron(
+    [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]],
+    normals,
+  );
 }
 
 /** The regular dodecahedron. */

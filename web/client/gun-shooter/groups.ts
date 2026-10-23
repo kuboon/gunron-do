@@ -2,8 +2,8 @@
  * The enemies, as groups — and the shots, as where on the enemy they land.
  *
  * Each kind of enemy is a solid, and the rotations that land that solid on itself are a group: the
- * dihedral groups D₃ and D₄ for the plates, A₄ for the tetrahedron, S₄ for the cube and A₅ for the
- * dodecahedron. An enemy's state is one element of its group — the rotation that takes the home
+ * dihedral groups D₃ and D₄ for the plates, A₄ for the tetrahedron, S₄ for the cube and the
+ * octahedron — duals of each other, so the same group — and A₅ for the dodecahedron. An enemy's state is one element of its group — the rotation that takes the home
  * pose to the pose it is in now — and the home pose, the `e` face upright and facing the turret, is
  * the identity `e`.
  *
@@ -42,6 +42,7 @@ import {
   dodecahedron,
   faceCentre,
   faceNormal,
+  octahedron,
   plate,
   type Solid,
   tetrahedron,
@@ -53,7 +54,7 @@ export type Spin = "ccw" | "cw";
 export const SPINS: readonly Spin[] = ["ccw", "cw"];
 
 /** Every kind of enemy there is. */
-export type SpeciesId = "D3" | "D4" | "A4" | "S4" | "A5";
+export type SpeciesId = "D3" | "D4" | "A4" | "S4" | "O" | "A5";
 
 /** What is at a spot: the middle of a face, a corner, or the middle of an edge. */
 export type SpotKind = "face" | "vertex" | "edge";
@@ -229,12 +230,13 @@ function asPlate(spot: Spot): Spot {
   return spot;
 }
 
-/** The five kinds, built once. */
+/** The six kinds, built once. */
 export const SPECIES: Readonly<Record<SpeciesId, Species>> = {
   D3: species("D3", "D₃", "正三角形の板", plate(3)),
   D4: species("D4", "D₄", "正方形の板", plate(4)),
   A4: species("A4", "A₄", "正四面体", tetrahedron()),
   S4: species("S4", "S₄", "立方体", cube()),
+  O: species("O", "S₄", "正八面体", octahedron()),
   A5: species("A5", "A₅", "正十二面体", dodecahedron()),
 };
 
