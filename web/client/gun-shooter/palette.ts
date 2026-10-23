@@ -39,6 +39,7 @@ export const SPECIES_COLORS: Readonly<Record<SpeciesId, string>> = {
   D4: "#a3ff3c",
   A4: "#ff4fd8",
   S4: "#ff8a3d",
+  O: "#4fa8ff",
   A5: "#b58cff",
 };
 

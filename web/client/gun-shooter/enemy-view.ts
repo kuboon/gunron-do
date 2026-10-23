@@ -20,6 +20,7 @@ import * as THREE from "three";
 import { type Enemy, ENTRY_TIME, WHIRL_TIME } from "./game.ts";
 import { type Answer, type Species, type SpeciesId } from "./groups.ts";
 import {
+  DANGER,
   E_FACE,
   E_INK,
   FACE_COLORS,
@@ -79,6 +80,9 @@ export class EnemyView {
     THREE.MeshBasicMaterial
   >;
   readonly #hintLabel: THREE.Sprite;
+  // The count over its head: what finishing it is worth, until it runs out.
+  readonly #count: THREE.Sprite;
+  #countShown = -1;
   // The weaker hint: the axis the enemy is turned about.
   readonly #ownAxis: THREE.Mesh<
     THREE.CylinderGeometry,
@@ -198,6 +202,17 @@ export class EnemyView {
     );
     this.#hintLabel.renderOrder = 21;
     this.#hintLabel.scale.setScalar(0.5);
+    this.#count = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        transparent: true,
+        opacity: 0,
+        depthTest: false,
+        depthWrite: false,
+      }),
+    );
+    this.#count.renderOrder = 22;
+    this.#count.position.set(0, 1.05, 0);
+    this.#count.scale.setScalar(0.3);
     this.#ownAxis = new THREE.Mesh(
       new THREE.CylinderGeometry(0.022, 0.022, 3.2, 6, 1, true),
       unlit(0xffffff),
@@ -223,6 +238,7 @@ export class EnemyView {
       this.#ownAxis,
       this.#turnAxis,
       this.#hintLabel,
+      this.#count,
     );
     this.frame.scale.setScalar(enemy.radius);
 
@@ -463,6 +479,14 @@ export class EnemyView {
     this.#hintGlow.scale.setScalar(0.55 + 0.2 * hintPulse);
     this.#hintLabel.material.opacity = hintOn;
 
+    const n = this.enemy.bonus;
+    if (n !== this.#countShown && n > 0) {
+      this.#countShown = n;
+      this.#count.material.map = label(String(n), countColor(n));
+      this.#count.material.needsUpdate = true;
+    }
+    this.#count.material.opacity = n > 0 ? grow : 0;
+
     const ownOn = this.#axis !== null && settled ? 0.7 : 0;
     this.#ownAxis.material.opacity = this.#ownCorner ? 0 : ownOn;
     this.#ownGlow.material.opacity = this.#ownCorner ? ownOn : 0;
@@ -488,6 +512,7 @@ export class EnemyView {
       m.material.dispose();
     }
     this.#hintLabel.material.dispose();
+    this.#count.material.dispose();
     for (
       const g of [this.#aimGlow, this.#hintGlow, this.#turnGlow, this.#ownGlow]
     ) {
@@ -498,6 +523,11 @@ export class EnemyView {
     this.#ground.geometry.dispose();
     this.#ground.material.dispose();
   }
+}
+
+/** The count's colour: gold while there is room, warming to red as it runs out. */
+function countColor(n: number): string {
+  return n >= 3 ? GOLD : n === 2 ? "#ff9f3d" : DANGER;
 }
 
 /** What an enemy coming in tumbles about: slanted, so its top and sides both come round. */
