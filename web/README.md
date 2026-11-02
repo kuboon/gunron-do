@@ -544,6 +544,26 @@ That also makes a preview deploy share its own template and its own board.
 are carried on to the image URL, so a recording — which the picture never shows
 — goes to the board and no further.
 
+## X の Player Card
+
+X に貼ったリンクはポストの中でリプレイが動く（Player Card）。共有 URL は
+og.kbn.one の `/share` で、テンプレートの `player` に書いた
+`/tetra-do/player?date=…&rec=…` が `twitter:player` になる。X が iframe で開くのは
+このページで、`client/tetra-do/player.tsx` がリプレイだけの画面を作る。
+
+- 枠は 480×480 が基準で、245〜500px 幅まで縮む。パネルは `<html>` の
+  font-size を枠の大きさに合わせて変え、`rem` のサイズ全体を比例させる。
+- フレームに入れる前提のページなので、リンクは新しいタブで開き、シェア・実績・
+  GameCenter は出さない。`<meta name="robots" content="noindex">` と
+  `canonical`（ゲームのページ）を付ける。
+- iframe の `sandbox` は `alert` と `<form>` 送信を許さない。このページは使わない。
+- フレーム許可は HTTP ヘッダーで決まり、GitHub Pages は `X-Frame-Options` を
+  付けないので何もしなくてよい。別のホストに移すときは `frame-ancestors` で
+  x.com と twitter.com を許可し、`X-Frame-Options` は付けないこと。
+- 確かめ方: `curl -sA Twitterbot/1.0 '<共有URL>' | grep twitter:` と、同じ
+  `sandbox` を付けた iframe でプレイヤーのページを開く。X はカードを強くキャッシュ
+  するので、直したあとは `?v=2` のようにクエリを変えて貼り直す。
+
 ## GameCenter
 
 テトラ道 records achievements on [GameCenter](https://ga-cen.kbn.one). The hub

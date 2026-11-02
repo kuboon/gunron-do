@@ -61,12 +61,36 @@ export const TetraPanel = clientEntry(
       ? null
       : readSession();
 
+    // Framed by a Player Card on X: the page says so with `data-player` on its root. A frame inside
+    // somebody's timeline replays the round and nothing else — its links open a new tab, and it
+    // has no share row, no achievements and no round of its own to play.
+    const embedded = typeof document !== "undefined" &&
+      document.querySelector("[data-player]") !== null;
+
+    // The frame is anything from about 245 to 500 wide and every size in this game is in `rem`, so
+    // the root's own size is what scales the lot: 16px at the 480 the card asks for, and
+    // proportionally less in a narrower one. Said on the root because `rem` reads nothing else.
+    if (embedded) {
+      const fit = () => {
+        document.documentElement.style.fontSize = `${
+          Math.min(innerWidth, innerHeight) / 30
+        }px`;
+      };
+      fit();
+      addEventListener("resize", fit);
+      handle.signal.addEventListener(
+        "abort",
+        () => removeEventListener("resize", fit),
+        { once: true },
+      );
+    }
+
     // The board behind the panel is the one the player is about to be handed.
     if (session !== null) game.preview(session.date);
 
     // GameCenter, as early as there is a page: a player sent here by the hub carries a launch token
     // in the URL, and the SDK takes it out of the address bar as it starts.
-    if (session !== null) unlocks.start();
+    if (session !== null && !embedded) unlocks.start();
 
     // Held apart from `session` so the decode below can name it inside a callback.
     const rec = session?.rec ?? null;
@@ -151,7 +175,10 @@ export const TetraPanel = clientEntry(
     // the server drew a page with no lesson on it. Starting one here and now would have the
     // islands render something else on their very first pass, and what is already in the document
     // stays where it is rather than being replaced.
-    if (session !== null && session.rec === null && !tutorial.dismissed) {
+    if (
+      session !== null && session.rec === null && !embedded &&
+      !tutorial.dismissed
+    ) {
       setTimeout(() => tutorial.start(), 0);
     }
 
@@ -193,21 +220,38 @@ export const TetraPanel = clientEntry(
               >
                 リプレイを再生
               </button>
-              <a
-                mix={secondaryLinkStyle}
-                data-rmx-document
-                href={playUrl(session.date)}
-              >
-                自分で挑戦
-              </a>
+              {embedded
+                ? (
+                  <a
+                    mix={secondaryLinkStyle}
+                    href={playUrl(session.date)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    自分で挑戦
+                  </a>
+                )
+                : (
+                  <a
+                    mix={secondaryLinkStyle}
+                    data-rmx-document
+                    href={playUrl(session.date)}
+                  >
+                    自分で挑戦
+                  </a>
+                )}
             </div>
-            {shareRow(
-              shareCardUrl(session.date, recording.rec, recording.result),
-              () => {
-                if (played) unlocks.shared();
-              },
+            {embedded ? null : (
+              <>
+                {shareRow(
+                  shareCardUrl(session.date, recording.rec, recording.result),
+                  () => {
+                    if (played) unlocks.shared();
+                  },
+                )}
+                {claim()}
+              </>
             )}
-            {claim()}
           </div>
         );
       }

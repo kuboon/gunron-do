@@ -97,6 +97,13 @@ export interface LayoutProps {
    * hub looks when it reads the page: the published page is the document it registers.
    */
   gamecenter?: GameCenterManifest;
+  /**
+   * Keeps the page out of search, for a page that exists to be framed rather than found — the
+   * inline player X shows in a post. Paired with `canonical`, so what it duplicates is credited.
+   */
+  noindex?: boolean;
+  /** The page this one stands in for, as an absolute URL or a path. */
+  canonical?: string;
   children: RemixNode;
 }
 
@@ -147,6 +154,10 @@ export function Layout(props: LayoutProps): RemixNode {
           content={props.viewport ?? "width=device-width, initial-scale=1"}
         />
         <title>{props.title}</title>
+        {props.noindex ? <meta name="robots" content="noindex" /> : null}
+        {props.canonical
+          ? <link rel="canonical" href={props.canonical} />
+          : null}
         {props.description
           ? <meta name="description" content={props.description} />
           : null}
