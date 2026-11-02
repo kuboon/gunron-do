@@ -32,7 +32,7 @@ import type { FileServerBehavior } from "@remix-kbn/ssg/site";
 
 import { assets, assetsPath } from "./assets.ts";
 import { readRules, rulesImage } from "./rules.ts";
-import { ogImage, ogPaths, serveOgImage } from "./og/mod.ts";
+import { ogImage, ogPaths, serveOgImage, siteUrl } from "./og/mod.ts";
 import { shareTemplate } from "./tetra-do/share.ts";
 import { base } from "../client/base.ts";
 import { findGame } from "../client/games.ts";
@@ -42,6 +42,7 @@ import { routes } from "../client/routes.ts";
 
 import * as Home from "../client/pages/index.tsx";
 import * as TetraDo from "../client/tetra-do/page.tsx";
+import * as TetraDoPlayer from "../client/tetra-do/player.tsx";
 import * as GunShooter from "../client/gun-shooter/page.tsx";
 import * as SciAmerican2008 from "../client/sci-american-2008/page.tsx";
 import RulesPage from "../client/pages/rules.tsx";
@@ -71,6 +72,13 @@ interface Page {
   ogTitle?: string;
   /** Set by a game that records achievements on GameCenter — its manifest, for the `<head>`. */
   gamecenter?: GameCenterManifest;
+  /** Set by a page that is there to be framed, not found. */
+  noindex?: boolean;
+}
+
+/** A path on this site as an absolute URL when the deploy URL is known, and as the path when not. */
+function absolute(path: string): string {
+  return siteUrl ? new URL(path, siteUrl.origin).href : path;
 }
 
 /**
@@ -84,7 +92,11 @@ interface Page {
  * @param page The page module — its component, its title, and how it wants to be framed
  * @returns An action for `router.get`
  */
-function pageAction(route: { href(): string }, page: Page) {
+function pageAction(
+  route: { href(): string },
+  page: Page,
+  stands?: { href(): string },
+) {
   const image = ogImage(route.href(), page);
 
   return (context: AppContext): Response =>
@@ -97,6 +109,8 @@ function pageAction(route: { href(): string }, page: Page) {
         chrome: page.chrome,
         background: page.background,
         gamecenter: page.gamecenter,
+        noindex: page.noindex,
+        canonical: stands === undefined ? undefined : absolute(stands.href()),
         script: page.hydrate ? clientRuntime : null,
         children: page.default(),
       }),
@@ -153,6 +167,11 @@ declare module "@remix-run/fetch-router" {
 router.get(routes.home, pageAction(routes.home, Home));
 // One line per game. The screen is bespoke, so it is named here rather than looked up.
 router.get(routes.tetraDo, pageAction(routes.tetraDo, TetraDo));
+// The replay on its own, framed by X from a Player Card. It stands in for the game's page.
+router.get(
+  routes.tetraDoPlayer,
+  pageAction(routes.tetraDoPlayer, TetraDoPlayer, routes.tetraDo),
+);
 router.get(routes.gunShooter, pageAction(routes.gunShooter, GunShooter));
 router.get(
   routes.sciAmerican2008,
@@ -227,6 +246,7 @@ export const entryPoints: readonly string[] = [
   "/",
   // Prefix-free, like the cards: the build mounts the site under the deploy prefix itself.
   routes.tetraDoOg.href().slice(base.length),
+  routes.tetraDoPlayer.href().slice(base.length),
   ...ogPaths(),
 ];
 

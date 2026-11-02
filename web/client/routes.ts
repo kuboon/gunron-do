@@ -33,6 +33,13 @@ export const routes = route(base, {
    * share URL names it from here, so a rename is one edit like every other path.
    */
   tetraDoOg: get("/tetra-do/og.json"),
+  /**
+   * The replay on its own, for the inline player X shows in a post — see `tetra-do/player.tsx`.
+   *
+   * Not linked from anywhere on the site: the template og.kbn.one fills in names it as the
+   * card's `twitter:player`, and it is the page X puts in an iframe.
+   */
+  tetraDoPlayer: get("/tetra-do/player"),
   /** 群シューター, full screen. */
   gunShooter: get("/gun-shooter"),
   /** M₁₂, M₂₄ and Dotto, the three puzzles from Scientific American (2008), on one page. */

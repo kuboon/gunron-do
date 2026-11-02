@@ -27,6 +27,12 @@
  * wide card keeps everything it says inside that middle square, and what is outside it is only
  * background.
  *
+ * The template also names a player. X can play a link inline — a Player Card, `twitter:card=player` —
+ * and what it plays is `twitter:player`, a page it puts in an iframe under the post. That page is
+ * {@link routes.tetraDoPlayer}: the replay on its own, with the round's `date` and `rec` in the
+ * query. The service writes the tags; the template only says where the page is and how big the
+ * frame is, and the service refuses a player that is not https on the template's own host.
+ *
  * The drawing is resvg's, not Skia's: no `foreignObject`, no external stylesheet, and the fonts
  * are named in the template and subset from Google Fonts rather than vendored here. So the SVG
  * says everything in attributes — one font family at one weight, and size and colour doing the
@@ -97,6 +103,9 @@ export function shareTemplate(): string {
   const game = siteUrl
     ? new URL(routes.tetraDo.href(), siteUrl.origin).href
     : null;
+  const player = siteUrl
+    ? new URL(routes.tetraDoPlayer.href(), siteUrl.origin).href
+    : null;
 
   return `${
     JSON.stringify(
@@ -104,6 +113,16 @@ export function shareTemplate(): string {
         vars: VARS,
         fonts: [FONT],
         ...(game === null ? {} : { url: `${game}?date={{date}}&rec={{rec}}` }),
+        // X plays the round in the post: `twitter:player` is the replay on its own. 480 square is
+        // what the working examples use; a larger frame has been reported to fall back to a plain
+        // image card. See the x-player-card skill.
+        ...(player === null ? {} : {
+          player: {
+            url: `${player}?date={{date}}&rec={{rec}}`,
+            width: 480,
+            height: 480,
+          },
+        }),
         og: {
           site_name: SITE_NAME,
           type: "website",
