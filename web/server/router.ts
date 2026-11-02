@@ -74,6 +74,8 @@ interface Page {
   gamecenter?: GameCenterManifest;
   /** Set by a page that is there to be framed, not found. */
   noindex?: boolean;
+  /** Set by a page that is shown in somebody else's frame, so it must let scrolling through. */
+  framed?: boolean;
 }
 
 /** A path on this site as an absolute URL when the deploy URL is known, and as the path when not. */
@@ -110,6 +112,7 @@ function pageAction(
         background: page.background,
         gamecenter: page.gamecenter,
         noindex: page.noindex,
+        framed: page.framed,
         canonical: stands === undefined ? undefined : absolute(stands.href()),
         script: page.hydrate ? clientRuntime : null,
         children: page.default(),

@@ -22,6 +22,7 @@ import { css, type RemixNode } from "@remix-run/ui";
 import { TetraBoard } from "./islands/tetra-board.tsx";
 import { TetraHud } from "./islands/tetra-hud.tsx";
 import { TetraPanel } from "./islands/tetra-panel.tsx";
+import { TetraPlayerBar } from "./islands/tetra-player-bar.tsx";
 import { TetraSolid } from "./islands/tetra-solid.tsx";
 import { findGame } from "../games.ts";
 import { ink, surface } from "./palette.ts";
@@ -43,6 +44,15 @@ export const noindex = true;
 
 export const viewport = "width=device-width, initial-scale=1";
 
+/**
+ * Lives in a frame inside somebody's page, so it must not hold on to the gestures that page needs.
+ *
+ * A game takes the document's overscroll and turns off the browser's panning so a drag is a trace.
+ * Here nothing is traced, and a wheel or a swipe that lands on the frame has to go on to the post
+ * under it — otherwise the frame is a place the timeline cannot be scrolled from.
+ */
+export const framed = true;
+
 export default function TetraDoPlayerPage(): RemixNode {
   return (
     <div mix={screenStyle} data-player>
@@ -58,6 +68,9 @@ export default function TetraDoPlayerPage(): RemixNode {
           <TetraPanel />
         </div>
       </div>
+      <div mix={barAreaStyle}>
+        <TetraPlayerBar />
+      </div>
     </div>
   );
 }
@@ -68,7 +81,7 @@ export default function TetraDoPlayerPage(): RemixNode {
  * Two rows in the frame's own height: the solid beside the clock, then the board.
  *
  * `svh` and not a fixed size because the frame is whatever X makes it. The board is held to the
- * height it is given — 58 of 100 — and centred, so a frame that is wider than it is tall still
+ * height it is given — 52 of 100 — and centred, so a frame that is wider than it is tall still
  * has a square board in it.
  */
 const screenStyle = css({
@@ -76,8 +89,8 @@ const screenStyle = css({
   height: "100svh",
   display: "grid",
   gridTemplateColumns: "1fr 1fr",
-  gridTemplateRows: "minmax(0, 36fr) minmax(0, 64fr)",
-  gridTemplateAreas: `"solid hud" "board board"`,
+  gridTemplateRows: "minmax(0, 33fr) minmax(0, 55fr) auto",
+  gridTemplateAreas: `"solid hud" "board board" "bar bar"`,
   columnGap: "0.5rem",
   rowGap: "0.35rem",
   padding: "0.4rem",
@@ -106,10 +119,15 @@ const boardAreaStyle = css({
   position: "relative",
   minHeight: 0,
   justifySelf: "center",
-  width: "min(100%, 58svh)",
+  width: "min(100%, 52svh)",
   aspectRatio: "1",
   display: "grid",
+  // Nothing is traced here, and a swipe that starts on the board is the reader scrolling the post.
+  // `!important` because the board turns panning off on itself and on every cell inside it.
+  "&, & *": { touchAction: "pan-y !important" },
 });
+
+const barAreaStyle = css({ gridArea: "bar" });
 
 const panelAreaStyle = css({
   position: "absolute",

@@ -102,6 +102,15 @@ export interface LayoutProps {
    * inline player X shows in a post. Paired with `canonical`, so what it duplicates is credited.
    */
   noindex?: boolean;
+  /**
+   * Whether the page is shown inside a frame on somebody else's page.
+   *
+   * A `bare` page swallows the document's overscroll, which is right for a game that fills the
+   * screen — a bounce at the edge of the board is a lost trace — and wrong for one in a frame:
+   * the scroll that ends at the frame's edge has nowhere to go, and the post under it stops
+   * scrolling whenever the pointer is over the game.
+   */
+  framed?: boolean;
   /** The page this one stands in for, as an absolute URL or a path. */
   canonical?: string;
   children: RemixNode;
@@ -119,13 +128,14 @@ export interface LayoutProps {
  * viewport meta is the other way to say it, and iOS has ignored it since 10, rightly.)
  *
  * @param background What to paint the document, or `undefined` to leave it
+ * @param framed Whether the page is in somebody else's frame and so must let scrolling through
  * @returns The `<body>` style for a page that has been given the screen
  */
-function bodyStyle(background: string | undefined) {
+function bodyStyle(background: string | undefined, framed: boolean) {
   return {
     background,
-    overscrollBehavior: "none",
-    touchAction: "manipulation",
+    overscrollBehavior: framed ? "auto" : "none",
+    touchAction: framed ? "auto" : "manipulation",
   } as const;
 }
 
@@ -187,7 +197,11 @@ export function Layout(props: LayoutProps): RemixNode {
           <link key={href} rel="modulepreload" href={href} />
         ))}
       </head>
-      <body style={bare ? bodyStyle(props.background) : undefined}>
+      <body
+        style={bare
+          ? bodyStyle(props.background, props.framed === true)
+          : undefined}
+      >
         {bare ? null : (
           <header mix={[bandStyle, headerStyle]}>
             <a mix={brandStyle} href={routes.home.href()}>gunron-do</a>
